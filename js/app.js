@@ -118,11 +118,11 @@
   function cacheDom() {
     const ids = [
       'status-message', 'file-input-main', 'file-input-compare', 'file-name-main', 'file-name-compare',
-      'btn-clear-main', 'btn-clear-compare',
       'drop-zone-main', 'drop-zone-compare', 'btn-mode-sum', 'btn-mode-avg', 'btn-export-png',
       'btn-toggle-table', 'btn-reset-data', 'btn-fullscreen', 'btn-theme-toggle', 'chart-main-title',
       'chart-sub-title', 'chart-wrapper', 'chart-placeholder', 'main-chart-canvas', 'chart-tooltip',
       'compare-legend', 'legend-main-label', 'legend-compare-label', 'share-section', 'share-bar',
+      'share-bar-compare-container', 'share-bar-compare', 'share-meta-main', 'share-meta-compare',
       'share-legend', 'btn-toggle-band-settings', 'band-settings-panel', 'band-list', 'btn-add-band',
       'btn-close-band-settings', 'table-container', 'table-header-row', 'table-body', 'table-foot',
       'table-main-title', 'table-hint', 'table-view-toggle', 'btn-table-view-primary', 'btn-table-view-compare',
@@ -351,7 +351,7 @@
 
   function applyBandChanges() {
     if (state.primary) {
-      renderShareBar(state.primary);
+      renderShareBar(state.primary, state.compare);
       renderKpiPeakSplit(state.primary, state.compare);
     }
     persistCurrentState();
@@ -516,7 +516,7 @@
   }
 
   /**
-   * 複数ファイルの非同期読み込み・解析
+   * 複数ファイルの非同期読み込み・解析（逐次メモリ解放 & メインスレッド開放型）
    * @param {Array<File>} files
    * @param {'main'|'compare'} slot
    */
@@ -527,14 +527,27 @@
       return;
     }
 
+    const totalCount = csvFiles.length;
     const sequence = ++state.loadSequence[slot];
-    showStatus(csvFiles.length + '件のファイルを読み込み解析中...', 'info', 0);
+    const isLargeBatch = totalCount >= 8;
+
+    showStatus(totalCount + '件のファイルを読み込み解析中...', 'info', 0);
 
     const parsedSets = [];
     const errors = [];
+    const BATCH_YIELD_INTERVAL = 3; // 3ファイルごとにメインスレッドを開放しGC機会を提供
 
-    for (let i = 0; i < csvFiles.length; i++) {
+    for (let i = 0; i < totalCount; i++) {
+      if (sequence !== state.loadSequence[slot]) return;
+
       const file = csvFiles[i];
+
+      // 大量ファイル処理時は進捗を更新し、メインスレッドを開放してUIの固まりとメモリ蓄積を防止
+      if (isLargeBatch && (i % BATCH_YIELD_INTERVAL === 0 || i === totalCount - 1)) {
+        showStatus('ファイル解析中: ' + (i + 1) + ' / ' + totalCount + '件 (' + Math.round(((i + 1) / totalCount) * 100) + '%)...', 'info', 0);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
       if (file.size === 0) {
         errors.push(file.name + ': 空のファイルです');
         continue;
@@ -545,8 +558,9 @@
       }
 
       try {
-        const buffer = await file.arrayBuffer();
+        let buffer = await file.arrayBuffer();
         const ds = Parser.parse(buffer, file.name);
+        buffer = null; // バイナリバッファの参照を即時破棄してメモリ解放
         parsedSets.push(ds);
       } catch (err) {
         errors.push(file.name + ': ' + (err.message || '形式不正'));
@@ -611,14 +625,12 @@
   function updateFilePill(slot, dataSet) {
     const isMain = slot === 'main';
     const pill = dom[isMain ? 'file-name-main' : 'file-name-compare'];
-    const clearBtn = dom[isMain ? 'btn-clear-main' : 'btn-clear-compare'];
     if (!pill) return;
 
     if (!dataSet) {
       pill.textContent = isMain ? '分析: 未読込' : '比較: 未読込';
       pill.removeAttribute('title');
       pill.classList.add('hidden');
-      if (clearBtn) clearBtn.classList.add('hidden');
       return;
     }
 
@@ -631,10 +643,6 @@
       (dataSet.sourceFiles ? dataSet.sourceFiles.join('\n') : dataSet.meta.fileName)
     );
     pill.classList.remove('hidden');
-    if (clearBtn) {
-      clearBtn.classList.remove('hidden');
-      clearBtn.setAttribute('title', (isMain ? '分析データ' : '比較データ') + 'をすべてクリア');
-    }
   }
 
   function clearSlot(slot) {
@@ -668,12 +676,6 @@
     }
     if (dom['file-name-compare']) {
       dom['file-name-compare'].addEventListener('click', () => openFileManager('compare'));
-    }
-    if (dom['btn-clear-main']) {
-      dom['btn-clear-main'].addEventListener('click', () => clearSlot('main'));
-    }
-    if (dom['btn-clear-compare']) {
-      dom['btn-clear-compare'].addEventListener('click', () => clearSlot('compare'));
     }
     if (dom['btn-close-file-manager']) {
       dom['btn-close-file-manager'].addEventListener('click', closeFileManager);
@@ -954,7 +956,7 @@
     renderKpis(primary, compare);
     HourlyChart.renderMain(dom['main-chart-canvas'], dom['chart-tooltip'], primary, compare, state.visibility, setActiveRow);
     syncDiscountChipAvailability(primary);
-    renderShareBar(primary);
+    renderShareBar(primary, compare);
     renderTableHeader();
     renderTable();
   }
@@ -1097,12 +1099,21 @@
         .forEach(hideCompareText);
     }
 
-    // スパークライン
+    // スパークライン（比較データがある場合は点線で重ねて描画）
+    const hasCompare = Boolean(compare);
     const series = (key) => primary.slots.map((s) => (s.hasData ? s[key] : null));
-    HourlyChart.renderSparkline(document.getElementById('spark-sales'), series('sales'), 'sales');
-    HourlyChart.renderSparkline(document.getElementById('spark-customers'), series('customers'), 'customers');
-    HourlyChart.renderSparkline(document.getElementById('spark-items'), series('items'), 'items');
-    HourlyChart.renderSparkline(document.getElementById('spark-discount-rate'), series('discountRate'), 'discountRate');
+    const cSeries = (key) => (hasCompare ? compare.slots.map((s) => (s.hasData ? s[key] : null)) : null);
+
+    HourlyChart.renderSparkline(document.getElementById('spark-sales'), series('sales'), 'sales', cSeries('sales'));
+    HourlyChart.renderSparkline(document.getElementById('spark-customers'), series('customers'), 'customers', cSeries('customers'));
+    HourlyChart.renderSparkline(document.getElementById('spark-items'), series('items'), 'items', cSeries('items'));
+    HourlyChart.renderSparkline(document.getElementById('spark-discount-rate'), series('discountRate'), 'discountRate', cSeries('discountRate'));
+
+    // スパークラインのミニ凡例表示制御
+    ['spark-sales-legend', 'spark-customers-legend', 'spark-items-legend', 'spark-discount-rate-legend'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', !hasCompare);
+    });
   }
 
   function renderKpiPeakSplit(primary, compare) {
@@ -1151,12 +1162,10 @@
     setTextWithPop('kpi-peak-split', textVal);
     setText('kpi-peak-split-sub', subVal);
 
-    // 時間帯区分に色分けした横棒グラフ（スパークライン）を描画
-    HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), bandStats);
-
+    let cBandStats = null;
     if (compare && compare.totals.sales > 0 && bandStats.length > 0) {
       const cTotal = compare.totals.sales;
-      const cBandStats = activeBands.map((b) => {
+      cBandStats = activeBands.map((b) => {
         const sales = compare.slots
           .filter((s) => s.hasData && s.hour >= b.from && s.hour <= b.to)
           .reduce((acc, s) => acc + (s.sales ?? 0), 0);
@@ -1184,6 +1193,11 @@
       hideCompareText('kpi-peak-split-compare');
       renderBadge('kpi-peak-split-badge', null, null);
     }
+
+    // 時間帯区分に色分けした横棒グラフ（スパークライン）を描画（比較データがある場合は上下2段）
+    HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), bandStats, cBandStats);
+    const peakLegendEl = document.getElementById('spark-peak-split-legend');
+    if (peakLegendEl) peakLegendEl.classList.toggle('hidden', !cBandStats);
   }
 
   function resetKpis() {
@@ -1199,13 +1213,22 @@
       .forEach((id) => renderBadge(id, null, null));
     ['kpi-sales-compare', 'kpi-customers-compare', 'kpi-items-compare', 'kpi-avg-spend-compare', 'kpi-discount-rate-compare', 'kpi-peak-split-compare']
       .forEach(hideCompareText);
+    ['spark-sales-legend', 'spark-customers-legend', 'spark-items-legend', 'spark-discount-rate-legend', 'spark-peak-split-legend']
+      .forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
     HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), []);
   }
 
-  function renderShareBar(primary) {
+  function renderShareBar(primary, compare) {
     const total = primary.totals.sales;
     dom['share-bar'].replaceChildren();
+    if (dom['share-bar-compare']) dom['share-bar-compare'].replaceChildren();
     dom['share-legend'].replaceChildren();
+    if (dom['share-meta-main']) dom['share-meta-main'].textContent = '';
+    if (dom['share-meta-compare']) dom['share-meta-compare'].textContent = '';
+
     if (!Fmt.isNum(total) || total <= 0) return;
 
     const activeBands = state.timeBands.filter((b) => b.enabled);
@@ -1214,34 +1237,121 @@
       msg.className = 'share-legend-item';
       msg.textContent = '※表示対象の時間帯区分が選択されていません。「時間帯区分を設定」から区分を有効にしてください。';
       dom['share-legend'].appendChild(msg);
+      if (dom['share-bar-compare-container']) dom['share-bar-compare-container'].classList.add('hidden');
       return;
     }
 
-    activeBands.forEach((band) => {
-      const bandSales = primary.slots
+    // 分析データメタ情報
+    if (dom['share-meta-main']) {
+      dom['share-meta-main'].textContent =
+        primary.meta.dateLabel + ' ' + primary.meta.storeName + ' （売上合計: ' + Fmt.yen(total) + '）';
+    }
+
+    // 分析データバー構築
+    const primaryBandData = activeBands.map((band) => {
+      const sales = primary.slots
         .filter((s) => s.hasData && s.hour >= band.from && s.hour <= band.to)
         .reduce((acc, s) => acc + (s.sales ?? 0), 0);
-      const share = (bandSales / total) * 100;
+      const share = (sales / total) * 100;
+      return { band, sales, share };
+    });
 
+    primaryBandData.forEach(({ band, sales, share }) => {
       const segment = document.createElement('div');
       segment.className = 'share-segment';
       segment.style.backgroundColor = band.color || '#38bdf8';
       segment.style.setProperty('--share', share.toFixed(2));
       segment.textContent = share >= 6 ? share.toFixed(1) + '%' : '';
       const rangeText = String(band.from).padStart(2, '0') + ':00〜' + String(band.to).padStart(2, '0') + ':00';
-      segment.setAttribute('title', band.name + ' (' + rangeText + '): ' + Fmt.yen(bandSales) + '（' + share.toFixed(1) + '%）');
+      segment.setAttribute('title', '【分析】' + band.name + ' (' + rangeText + '): ' + Fmt.yen(sales) + '（' + share.toFixed(1) + '%）');
       dom['share-bar'].appendChild(segment);
+    });
 
+    // 比較データが存在するか確認
+    const hasCompare = !!(compare && compare.totals.sales > 0);
+    let compareBandData = null;
+
+    if (hasCompare) {
+      const cTotal = compare.totals.sales;
+      if (dom['share-meta-compare']) {
+        dom['share-meta-compare'].textContent =
+          compare.meta.dateLabel + ' ' + compare.meta.storeName + ' （売上合計: ' + Fmt.yen(cTotal) + '）';
+      }
+
+      compareBandData = activeBands.map((band) => {
+        const sales = compare.slots
+          .filter((s) => s.hasData && s.hour >= band.from && s.hour <= band.to)
+          .reduce((acc, s) => acc + (s.sales ?? 0), 0);
+        const share = cTotal > 0 ? (sales / cTotal) * 100 : 0;
+        return { band, sales, share };
+      });
+
+      if (dom['share-bar-compare']) {
+        compareBandData.forEach(({ band, sales, share }) => {
+          const segment = document.createElement('div');
+          segment.className = 'share-segment';
+          segment.style.backgroundColor = band.color || '#38bdf8';
+          segment.style.setProperty('--share', share.toFixed(2));
+          segment.textContent = share >= 6 ? share.toFixed(1) + '%' : '';
+          const rangeText = String(band.from).padStart(2, '0') + ':00〜' + String(band.to).padStart(2, '0') + ':00';
+          segment.setAttribute('title', '【比較】' + band.name + ' (' + rangeText + '): ' + Fmt.yen(sales) + '（' + share.toFixed(1) + '%）');
+          dom['share-bar-compare'].appendChild(segment);
+        });
+      }
+
+      if (dom['share-bar-compare-container']) {
+        dom['share-bar-compare-container'].classList.remove('hidden');
+      }
+    } else {
+      if (dom['share-bar-compare-container']) {
+        dom['share-bar-compare-container'].classList.add('hidden');
+      }
+    }
+
+    // 凡例生成（比較データがある場合は分析 vs 比較の構成比と比率差を表示）
+    primaryBandData.forEach((pData, idx) => {
+      const band = pData.band;
+      const rangeText = String(band.from).padStart(2, '0') + ':00〜' + String(band.to).padStart(2, '0') + ':00';
       const legend = document.createElement('span');
       legend.className = 'share-legend-item';
+
       const swatch = document.createElement('span');
       swatch.className = 'share-swatch';
       swatch.style.backgroundColor = band.color || '#38bdf8';
+
       const label = document.createElement('span');
-      label.textContent = band.name + ' (' + rangeText + ') ';
-      const value = document.createElement('strong');
-      value.textContent = Fmt.yen(bandSales) + '（' + share.toFixed(1) + '%）';
-      legend.append(swatch, label, value);
+      label.className = 'share-legend-label';
+      label.textContent = band.name + ' (' + rangeText + '): ';
+
+      const valMain = document.createElement('strong');
+      valMain.className = 'share-legend-val';
+      valMain.textContent = Fmt.yen(pData.sales) + '（' + pData.share.toFixed(1) + '%）';
+
+      legend.append(swatch, label, valMain);
+
+      if (hasCompare && compareBandData && compareBandData[idx]) {
+        const cData = compareBandData[idx];
+        const diffPt = pData.share - cData.share;
+        const diffSpan = document.createElement('span');
+        diffSpan.className = 'share-legend-diff';
+        diffSpan.style.marginLeft = '6px';
+        diffSpan.style.fontSize = '12px';
+        diffSpan.style.color = 'var(--text-muted, #64748b)';
+
+        const diffSign = diffPt > 0 ? '+' : '';
+        const diffColor = Math.abs(diffPt) < 0.05 ? 'inherit' : (diffPt > 0 ? '#10b981' : '#ef4444');
+        diffSpan.textContent = ' [比較: ' + Fmt.yen(cData.sales) + ' (' + cData.share.toFixed(1) + '%) / 差: ';
+
+        const diffVal = document.createElement('span');
+        diffVal.style.color = diffColor;
+        diffVal.style.fontWeight = '600';
+        diffVal.textContent = diffSign + diffPt.toFixed(1) + 'pt';
+
+        const closeParen = document.createTextNode(']');
+        diffSpan.append(diffVal, closeParen);
+        legend.appendChild(diffSpan);
+      }
+
       dom['share-legend'].appendChild(legend);
     });
   }

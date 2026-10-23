@@ -169,7 +169,10 @@
     };
     const pushRow = () => {
       pushCell();
-      rows.push(row);
+      // 内容が完全に空の行は配列に追加せずメモリを節約
+      if (row.some((c) => c.trim().length > 0)) {
+        rows.push(row);
+      }
       row = [];
       if (rows.length > MAX_ROWS) {
         throw new CsvFormatError('CSVの行数が上限 (' + MAX_ROWS + '行) を超えています。');
@@ -267,22 +270,37 @@
     return null;
   }
 
-  /** 店舗合計ブロック (総金額/総客数/総打数/総割引/割引率) の読み取り。検算用。 */
+  /** 店舗合計ブロック (総金額/総客数/総打数/総割引/割引率) の読み取り */
   function findStoreTotals(rows, startRow) {
-    for (let r = startRow; r < rows.length - 1; r++) {
-      const normalized = rows[r].map(normalizeHeader);
-      const salesIdx = normalized.indexOf('総金額');
+    for (let r = startRow; r < rows.length; r++) {
+      const row = rows[r];
+      const normalized = row.map(normalizeHeader);
+      const salesIdx = normalized.findIndex((h) => ['総金額', '店舗合計', '合計金額'].includes(h));
       if (salesIdx === -1) continue;
-      const valueRow = rows[r + 1];
-      const pick = (label) => {
-        const idx = normalized.indexOf(label);
-        return idx === -1 ? null : parseNumber(valueRow[idx]);
+
+      // ヘッダ行の次の行に値があるパターン、または同じ行の右側に値があるパターンの両方を探索
+      const valueRow = (r + 1 < rows.length && rows[r + 1].length > 0) ? rows[r + 1] : row;
+      const pick = (labels) => {
+        for (let i = 0; i < labels.length; i++) {
+          const idx = normalized.indexOf(labels[i]);
+          if (idx !== -1) {
+            const val = parseNumber(valueRow[idx]);
+            if (val !== null) return val;
+          }
+        }
+        return null;
       };
-      return {
-        sales: pick('総金額'),
-        customers: pick('総客数'),
-        items: pick('総打数')
-      };
+
+      const sales = pick(['総金額', '店舗合計', '合計金額', '金額']);
+      if (sales !== null) {
+        return {
+          sales,
+          customers: pick(['総客数', '客数']),
+          items: pick(['総打数', '打数', '総点数', '点数']),
+          discount: pick(['総割引', '総値引', '値引', '割引', '値引金額', '割引金額']),
+          discountRate: pick(['割引率', '値引率'])
+        };
+      }
     }
     return null;
   }
@@ -324,11 +342,22 @@
    * CSVに累計列があればそれを優先し、無い場合のみ再計算する。
    */
   function buildSlots(rows, headerRowIndex, columnIndex, warnings) {
-    const slots = [];
-    for (let h = HOUR_START; h <= HOUR_END; h++) slots.push(createEmptySlot(h));
-
     const cell = (row, key) => (columnIndex[key] === undefined ? null : row[columnIndex[key]]);
-    const outOfRangeHours = new Set();
+
+    // CSV内に存在する有効時間帯の範囲を事前スキャン (標準 8〜23時をベースに、早朝・深夜があれば拡張)
+    let minHour = HOUR_START;
+    let maxHour = HOUR_END;
+    for (let r = headerRowIndex + 1; r < rows.length; r++) {
+      const hour = parseHour(cell(rows[r], 'time'));
+      if (hour !== null) {
+        if (hour < minHour) minHour = Math.max(0, hour);
+        if (hour > maxHour) maxHour = Math.min(24, hour);
+      }
+    }
+
+    const slots = [];
+    for (let h = minHour; h <= maxHour; h++) slots.push(createEmptySlot(h));
+
     const duplicateHours = new Set();
 
     for (let r = headerRowIndex + 1; r < rows.length; r++) {
@@ -341,11 +370,9 @@
       const items = parseNumber(cell(row, 'items'));
       if (sales === null && customers === null && items === null) continue;
 
-      if (hour < HOUR_START || hour > HOUR_END) {
-        outOfRangeHours.add(formatHourLabel(hour));
-        continue;
-      }
-      const slot = slots[hour - HOUR_START];
+      const slotIndex = hour - minHour;
+      if (slotIndex < 0 || slotIndex >= slots.length) continue;
+      const slot = slots[slotIndex];
       if (slot.hasData) {
         duplicateHours.add(slot.label);
         continue;
@@ -364,9 +391,6 @@
       slot.cumDiscountRate = parseNumber(cell(row, 'cumDiscountRate'));
     }
 
-    if (outOfRangeHours.size > 0) {
-      warnings.push('08:00〜23:00 の範囲外の時間帯 (' + Array.from(outOfRangeHours).join(', ') + ') は集計対象外としました。');
-    }
     if (duplicateHours.size > 0) {
       warnings.push('重複した時間帯 (' + Array.from(duplicateHours).join(', ') + ') は最初の行のみ採用しました。');
     }
@@ -475,12 +499,22 @@
     const slots = buildSlots(rows, header.headerRowIndex, header.columnIndex, warnings);
     const totals = summarizeSlots(slots);
     if (totals.activeSlotCount === 0) {
-      throw new CsvFormatError('08:00〜23:00 の時間帯データが1件も見つかりませんでした。');
+      throw new CsvFormatError('時間帯データが1件も見つかりませんでした。');
     }
 
     const storeTotals = findStoreTotals(rows, header.headerRowIndex + 1);
-    if (storeTotals && storeTotals.sales !== null && Math.round(storeTotals.sales) !== Math.round(totals.sales)) {
-      warnings.push('CSVの店舗合計 (総金額) と 08:00〜23:00 の合計が一致しません。範囲外の時間帯が含まれている可能性があります。');
+    if (storeTotals && storeTotals.sales !== null) {
+      if (Math.round(storeTotals.sales) !== Math.round(totals.sales)) {
+        warnings.push('CSVの店舗合計 (総金額: ' + storeTotals.sales.toLocaleString() + '円) と時間帯スロットの合計 (' + Math.round(totals.sales).toLocaleString() + '円) に差があります。基幹システムの確定値である店舗合計を採用しました。');
+      }
+      totals.sales = storeTotals.sales;
+      if (storeTotals.customers !== null) totals.customers = storeTotals.customers;
+      if (storeTotals.items !== null) totals.items = storeTotals.items;
+      if (storeTotals.discount !== null) totals.discount = storeTotals.discount;
+      totals.discountRate = storeTotals.discountRate ?? calcDiscountRate(totals.discount, totals.sales);
+      totals.avgSpend = safeDivide(totals.sales, totals.customers);
+      totals.avgItemPrice = safeDivide(totals.sales, totals.items);
+      totals.itemsPerCustomer = safeDivide(totals.items, totals.customers);
     }
 
     const safeFileName = sanitizeDisplayText(fileName, 120);
@@ -537,42 +571,55 @@
     const running = { sales: 0, customers: 0, items: 0, discount: 0 };
     const hasAnyDiscount = dataSets.some((ds) => ds.hasDiscountColumn);
 
-    for (let h = HOUR_START; h <= HOUR_END; h++) {
-      const idx = h - HOUR_START;
+    // 全データセットに含まれる時間帯の最小・最大を特定
+    let startHour = HOUR_START;
+    let endHour = HOUR_END;
+    dataSets.forEach((ds) => {
+      ds.slots.forEach((s) => {
+        if (s.hasData) {
+          if (s.hour < startHour) startHour = s.hour;
+          if (s.hour > endHour) endHour = s.hour;
+        }
+      });
+    });
+
+    for (let h = startHour; h <= endHour; h++) {
       const slot = createEmptySlot(h);
-      const activeSets = dataSets.filter((ds) => ds.slots[idx] && ds.slots[idx].hasData);
-      const count = activeSets.length;
+      let sumSales = 0;
+      let sumCust = 0;
+      let sumItems = 0;
+      let sumDisc = 0;
+      let hasDataInAny = false;
+      let hasDiscInAny = false;
 
-      if (count > 0) {
-        slot.hasData = true;
-        let sumSales = 0;
-        let sumCust = 0;
-        let sumItems = 0;
-        let sumDisc = 0;
-        let discCount = 0;
-
-        activeSets.forEach((ds) => {
-          const s = ds.slots[idx];
+      dataSets.forEach((ds) => {
+        const s = ds.slots.find((item) => item.hour === h);
+        if (s && s.hasData) {
+          hasDataInAny = true;
           sumSales += s.sales ?? 0;
           sumCust += s.customers ?? 0;
           sumItems += s.items ?? 0;
           if (s.discount !== null) {
             sumDisc += s.discount;
-            discCount++;
+            hasDiscInAny = true;
           }
-        });
+        }
+      });
 
+      if (hasDataInAny) {
+        slot.hasData = true;
         if (aggMode === 'sum') {
           slot.sales = sumSales;
           slot.customers = sumCust;
           slot.items = sumItems;
-          slot.discount = discCount > 0 ? sumDisc : null;
+          slot.discount = hasDiscInAny ? sumDisc : null;
         } else {
-          // 平均モード: 有効なファイル数で除算
-          slot.sales = sumSales / count;
-          slot.customers = sumCust / count;
-          slot.items = sumItems / count;
-          slot.discount = discCount > 0 ? sumDisc / discCount : null;
+          // 平均モード (日商平均):
+          // 全時間帯の平均の合算が正確に日商平均 (全売上 ÷ fileCount) に一致するよう、全ファイル数 (日数) で除算
+          slot.sales = Math.round(sumSales / fileCount);
+          slot.customers = Math.round(sumCust / fileCount);
+          slot.items = Math.round(sumItems / fileCount);
+          slot.discount = hasDiscInAny ? Math.round(sumDisc / fileCount) : null;
         }
 
         slot.discountRate = calcDiscountRate(slot.discount, slot.sales);
@@ -587,14 +634,58 @@
         slot.cumSales = running.sales;
         slot.cumCustomers = running.customers;
         slot.cumItems = running.items;
-        slot.cumDiscount = discCount > 0 ? running.discount : null;
+        slot.cumDiscount = hasDiscInAny ? running.discount : null;
         slot.cumDiscountRate = calcDiscountRate(slot.cumDiscount, slot.cumSales);
       }
 
       slots.push(slot);
     }
 
-    const totals = summarizeSlots(slots);
+    // 各ファイルの確定合計値から全体の合計・平均を算出 (基幹システムと完全一致させる)
+    const totalSales = dataSets.reduce((acc, ds) => acc + (ds.totals.sales ?? 0), 0);
+    const totalCustomers = dataSets.reduce((acc, ds) => acc + (ds.totals.customers ?? 0), 0);
+    const totalItems = dataSets.reduce((acc, ds) => acc + (ds.totals.items ?? 0), 0);
+    const totalDiscount = dataSets.reduce((acc, ds) => acc + (ds.totals.discount ?? 0), 0);
+
+    const slotSummary = summarizeSlots(slots);
+
+    let totals;
+    if (aggMode === 'sum') {
+      totals = {
+        activeSlotCount: slotSummary.activeSlotCount,
+        firstLabel: slotSummary.firstLabel,
+        lastLabel: slotSummary.lastLabel,
+        sales: totalSales,
+        customers: totalCustomers,
+        items: totalItems,
+        discount: hasAnyDiscount ? totalDiscount : null,
+        discountRate: calcDiscountRate(totalDiscount, totalSales),
+        avgSpend: safeDivide(totalSales, totalCustomers),
+        avgItemPrice: safeDivide(totalSales, totalItems),
+        itemsPerCustomer: safeDivide(totalItems, totalCustomers),
+        peak: slotSummary.peak
+      };
+    } else {
+      // 平均モード (日商平均): 全売上・客数・打数をファイル数 (日数) で除算
+      const avgSales = Math.round(totalSales / fileCount);
+      const avgCust = Math.round(totalCustomers / fileCount);
+      const avgItems = Math.round(totalItems / fileCount);
+      const avgDisc = hasAnyDiscount ? Math.round(totalDiscount / fileCount) : null;
+      totals = {
+        activeSlotCount: slotSummary.activeSlotCount,
+        firstLabel: slotSummary.firstLabel,
+        lastLabel: slotSummary.lastLabel,
+        sales: avgSales,
+        customers: avgCust,
+        items: avgItems,
+        discount: avgDisc,
+        discountRate: calcDiscountRate(avgDisc, avgSales),
+        avgSpend: safeDivide(avgSales, avgCust),
+        avgItemPrice: safeDivide(avgSales, avgItems),
+        itemsPerCustomer: safeDivide(avgItems, avgCust),
+        peak: slotSummary.peak
+      };
+    }
 
     // メタ情報の集約
     const dates = Array.from(new Set(dataSets.map((ds) => ds.meta.isoDate).filter(Boolean))).sort();

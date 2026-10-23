@@ -447,51 +447,96 @@
     if (active.length === 0) hideTooltip();
   }
 
-  /** KPI カード用スパークライン */
-  function renderSparkline(canvas, values, metricKey) {
+  /**
+   * KPI カード用スパークライン
+   * @param {HTMLCanvasElement} canvas
+   * @param {Array<number|null>} values 分析データ
+   * @param {string} metricKey 指標キー
+   * @param {Array<number|null>|null} compareValues 比較データ（任意）
+   */
+  function renderSparkline(canvas, values, metricKey, compareValues) {
     if (!(canvas instanceof HTMLCanvasElement)) return;
     const existing = sparkCharts.get(canvas.id);
     if (existing) existing.destroy();
 
     const theme = readTheme();
     const color = theme.colors[metricKey] || theme.primary;
+    const hasCompare = Boolean(
+      Array.isArray(compareValues) &&
+      compareValues.length > 0 &&
+      compareValues.some((v) => Fmt.isNum(v) && v > 0)
+    );
+
+    const labels = (values && values.length > 0 ? values : (compareValues || [])).map((_, i) => i);
+
+    const datasets = [
+      {
+        label: '分析データ',
+        data: values,
+        borderColor: color,
+        borderWidth: 2,
+        borderDash: [],
+        pointRadius: 0,
+        tension: 0.35,
+        spanGaps: false,
+        fill: 'origin',
+        order: 2,
+        backgroundColor(context) {
+          const area = context.chart.chartArea;
+          if (!area) return withAlpha(color, hasCompare ? 0.08 : 0.15);
+          const gradient = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+          gradient.addColorStop(0, withAlpha(color, hasCompare ? 0.22 : 0.35));
+          gradient.addColorStop(1, withAlpha(color, 0));
+          return gradient;
+        }
+      }
+    ];
+
+    if (hasCompare) {
+      datasets.push({
+        label: '比較データ',
+        data: compareValues,
+        borderColor: withAlpha(color, 0.75),
+        borderWidth: 1.6,
+        borderDash: [3.5, 3],
+        pointRadius: 0,
+        tension: 0.35,
+        spanGaps: false,
+        fill: false,
+        order: 1
+      });
+    }
+
     const chart = new global.Chart(canvas, {
       type: 'line',
       data: {
-        labels: values.map((_, i) => i),
-        datasets: [{
-          data: values,
-          borderColor: color,
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.35,
-          spanGaps: false,
-          fill: 'origin',
-          backgroundColor(context) {
-            const area = context.chart.chartArea;
-            if (!area) return withAlpha(color, 0.15);
-            const gradient = context.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-            gradient.addColorStop(0, withAlpha(color, 0.35));
-            gradient.addColorStop(1, withAlpha(color, 0));
-            return gradient;
-          }
-        }]
+        labels,
+        datasets
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: 700 },
+        animation: { duration: 600 },
         events: [],
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
-        layout: { padding: { top: 2, bottom: 0 } }
+        scales: {
+          x: { display: false },
+          y: { display: false, beginAtZero: true }
+        },
+        layout: { padding: { top: 3, bottom: 0, left: 1, right: 1 } }
       }
     });
     sparkCharts.set(canvas.id, chart);
   }
 
-  /** 売上構成比カード用横棒グラフ (時間帯区分ごとに色分けした100%積み上げ横棒) */
-  function renderBandSparkline(canvas, bandStats) {
+  /**
+   * KPIカード用の時間帯区分色分け横棒グラフ（スパークライン）を描画。
+   * 比較データがある場合は上下2段（分析 / 比較）で比較表示する。
+   * @param {HTMLCanvasElement} canvas
+   * @param {Array<{ band: object, sales: number, share: number }>} bandStats
+   * @param {Array<{ band: object, sales: number, share: number }>|null} compareBandStats
+   */
+  function renderBandSparkline(canvas, bandStats, compareBandStats) {
     if (!(canvas instanceof HTMLCanvasElement)) return;
     const existing = sparkCharts.get(canvas.id);
     if (existing) {
@@ -503,23 +548,38 @@
     const totalSales = activeStats.reduce((acc, st) => acc + st.sales, 0);
     if (totalSales <= 0) return;
 
+    const hasCompare = Boolean(compareBandStats && compareBandStats.length > 0 && compareBandStats.some((st) => st.sales > 0));
+    const cTotalSales = hasCompare ? compareBandStats.reduce((acc, st) => acc + (st.sales || 0), 0) : 0;
+
+    const labels = hasCompare ? ['分析', '比較'] : ['構成比'];
+    const barThickness = hasCompare ? 8 : 16;
     const count = activeStats.length;
+
     const datasets = activeStats.map((st, i) => {
       let borderRadius = 0;
       if (count === 1) {
-        borderRadius = 4;
+        borderRadius = 3;
       } else if (i === 0) {
-        borderRadius = { topLeft: 4, bottomLeft: 4, topRight: 0, bottomRight: 0 };
+        borderRadius = { topLeft: 3, bottomLeft: 3, topRight: 0, bottomRight: 0 };
       } else if (i === count - 1) {
-        borderRadius = { topRight: 4, bottomRight: 4, topLeft: 0, bottomLeft: 0 };
+        borderRadius = { topRight: 3, bottomRight: 3, topLeft: 0, bottomLeft: 0 };
+      }
+
+      const primaryShare = (st.sales / totalSales) * 100;
+      let data = [primaryShare];
+
+      if (hasCompare) {
+        const cMatch = compareBandStats.find((cs) => cs.band.id === st.band.id);
+        const compareShare = (cMatch && cTotalSales > 0) ? (cMatch.sales / cTotalSales) * 100 : 0;
+        data = [primaryShare, compareShare];
       }
 
       return {
         label: st.band.name,
-        data: [(st.sales / totalSales) * 100],
+        data,
         backgroundColor: st.band.color || '#38bdf8',
         borderWidth: 0,
-        barThickness: 16,
+        barThickness,
         borderRadius
       };
     });
@@ -527,7 +587,7 @@
     const chart = new global.Chart(canvas, {
       type: 'bar',
       data: {
-        labels: ['構成比'],
+        labels,
         datasets
       },
       options: {
@@ -544,7 +604,7 @@
           x: { display: false, stacked: true, min: 0, max: 100 },
           y: { display: false, stacked: true }
         },
-        layout: { padding: { top: 8, bottom: 4, left: 0, right: 0 } }
+        layout: { padding: { top: hasCompare ? 4 : 8, bottom: 4, left: 0, right: 0 } }
       }
     });
     sparkCharts.set(canvas.id, chart);

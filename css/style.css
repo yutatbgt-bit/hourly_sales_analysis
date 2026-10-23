@@ -272,32 +272,6 @@ button.file-pill:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.file-pill-clear {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.12);
-  color: #f87171;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 700;
-  transition: all 0.2s ease;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.file-pill-clear:hover {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #ef4444;
-  transform: scale(1.1);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-}
 
 .pill-base {
   border-color: rgba(148, 163, 184, 0.4);
@@ -323,11 +297,6 @@ button.file-pill:hover {
   color: #0284c7;
 }
 
-:root[data-theme="light"] .file-pill-clear {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #dc2626;
-}
 
 /* Buttons */
 .btn {
@@ -1144,6 +1113,54 @@ button.file-pill:hover {
   height: 100% !important;
 }
 
+.spark-legend {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+  line-height: 1;
+  background: rgba(10, 18, 36, 0.45);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(4px);
+}
+
+:root[data-theme="light"] .spark-legend {
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.spark-legend.hidden {
+  display: none !important;
+}
+
+.spark-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.spark-line-solid {
+  display: inline-block;
+  width: 12px;
+  height: 0;
+  border-top: 2px solid currentColor;
+}
+
+.spark-line-dashed {
+  display: inline-block;
+  width: 12px;
+  height: 0;
+  border-top: 2px dashed currentColor;
+  opacity: 0.8;
+}
+
 .kpi-value.value-updated {
   animation: value-pop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1657,9 +1674,71 @@ button.file-pill:hover {
   to { opacity: 1; transform: translateY(0); }
 }
 
+.share-bars-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.share-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.share-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.share-bar-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+
+.share-bar-badge.tag-main {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.share-bar-badge.tag-compare {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+:root[data-theme="light"] .share-bar-badge.tag-main {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+:root[data-theme="light"] .share-bar-badge.tag-compare {
+  background: rgba(147, 51, 234, 0.12);
+  color: #7e22ce;
+  border-color: rgba(147, 51, 234, 0.3);
+}
+
+.share-bar-meta-text {
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .share-bar {
   display: flex;
-  height: 30px;
+  height: 28px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: rgba(255, 255, 255, 0.03);
@@ -1685,10 +1764,10 @@ button.file-pill:hover {
 }
 
 .share-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(560px, max-content) 1fr;
+  gap: 10px 32px;
+  margin-top: 12px;
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -1697,6 +1776,28 @@ button.file-pill:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
+}
+
+.share-legend-label {
+  display: inline-block;
+  min-width: 135px;
+  color: var(--text-muted);
+}
+
+.share-legend-val {
+  display: inline-block;
+  min-width: 160px;
+  font-family: var(--font-num);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+@media (max-width: 1080px) {
+  .share-legend {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 
 .share-legend-item strong {
@@ -1708,7 +1809,11 @@ button.file-pill:hover {
 .share-swatch {
   width: 10px;
   height: 10px;
+  min-width: 10px;
+  min-height: 10px;
   border-radius: 3px;
+  flex-shrink: 0;
+  display: inline-block;
 }
 
 .band-0 { background: #7dd3fc; }
@@ -1833,11 +1938,61 @@ button.file-pill:hover {
   transition: background-color 0.15s ease, color 0.25s ease;
 }
 
-.data-table td.td-time {
+/* 時間帯列の横スクロール固定 (Sticky Column) */
+.data-table th:first-child {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 25;
+  background-color: var(--table-th-bg);
+  box-shadow: 2px 0 0 var(--card-border), 4px 0 8px rgba(0, 0, 0, 0.25);
+  background-clip: padding-box;
+}
+
+.data-table tbody td.td-time {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background-color: #0d1526;
+  box-shadow: 2px 0 0 var(--card-border), 4px 0 8px rgba(0, 0, 0, 0.25);
+  background-clip: padding-box;
   font-family: var(--font-num);
   font-weight: 700;
   text-align: center;
   color: var(--title-color);
+  min-width: 90px;
+}
+
+:root[data-theme="light"] .data-table tbody td.td-time {
+  background-color: #ffffff;
+}
+
+.data-table tbody tr:hover td.td-time {
+  background-color: #16243d;
+}
+
+:root[data-theme="light"] .data-table tbody tr:hover td.td-time {
+  background-color: #f1f5f9;
+}
+
+.data-table tbody tr.row-active td.td-time {
+  background-color: #1a2c4e;
+}
+
+:root[data-theme="light"] .data-table tbody tr.row-active td.td-time {
+  background-color: #e2e8f0;
+}
+
+.data-table tfoot td.td-time {
+  position: sticky;
+  left: 0;
+  bottom: 0;
+  z-index: 15;
+  background-color: var(--table-th-bg);
+  box-shadow: 2px 0 0 var(--card-border), 4px 0 8px rgba(0, 0, 0, 0.25);
+  background-clip: padding-box;
+  text-align: center;
+  min-width: 90px;
 }
 
 .data-table td.td-cum {
@@ -1848,9 +2003,9 @@ button.file-pill:hover {
   border-left: 1px solid var(--card-border);
 }
 
-/* 列ごとのヒートマップ (強度は --heat: 0〜1 を JS から CSSOM で設定) */
+/* 列ごとのヒートマップ (強度は --heat: 0〜1 を JS から CSSOM で設定、濃淡を一段階強化: 0.32 -> 0.48) */
 .data-table td.heat {
-  background-color: rgba(var(--heat-rgb), calc(var(--heat, 0) * 0.32));
+  background-color: rgba(var(--heat-rgb), calc(var(--heat, 0) * 0.48));
 }
 
 .heat-sales         { --heat-rgb: var(--rgb-sales); }
