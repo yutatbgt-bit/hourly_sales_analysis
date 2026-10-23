@@ -34,7 +34,7 @@
     primary: null,
     compare: null,
     tooltipElement: null,
-    lastTooltipIndex: null,
+    lastTooltipKey: null,
     highlightIndex: null,
     onIndexHover: null
   };
@@ -232,52 +232,70 @@
     return row;
   }
 
-  function buildTooltipContent(index) {
-    const primarySlot = renderState.primary.slots[index];
-    const compareSlot = renderState.compare ? renderState.compare.slots[index] : null;
+  function buildTooltipContent(index, targetSeries) {
+    const isCompare = targetSeries === 'compare' && renderState.compare;
+    const activeDS = isCompare ? renderState.compare : renderState.primary;
+    const baselineDS = isCompare ? renderState.primary : renderState.compare;
+
+    const activeSlot = activeDS.slots[index];
+    const baselineSlot = baselineDS ? baselineDS.slots[index] : null;
     const fragment = document.createDocumentFragment();
 
     const title = el('div', 'tip-title');
-    title.appendChild(el('span', null, primarySlot.label + ' 台'));
-    title.appendChild(el('span', 'tip-title-sub', renderState.primary.meta.dateLabel + ' ' + renderState.primary.meta.storeName));
+    const titleLeft = el('div', 'tip-title-left');
+
+    if (renderState.compare) {
+      const badgeClass = isCompare ? 'tip-badge-compare' : 'tip-badge-main';
+      const badgeText = isCompare ? '比較データ' : '分析データ';
+      titleLeft.appendChild(el('span', 'tip-series-badge ' + badgeClass, badgeText));
+    }
+    titleLeft.appendChild(el('span', null, activeSlot.label + ' 台'));
+    title.appendChild(titleLeft);
+
+    title.appendChild(el('span', 'tip-title-sub', activeDS.meta.dateLabel + ' ' + activeDS.meta.storeName));
     fragment.appendChild(title);
 
-    if (!primarySlot.hasData) {
+    if (!activeSlot.hasData) {
       fragment.appendChild(el('div', 'tip-label', 'この時間帯のデータはありません（営業時間外）'));
       return fragment;
     }
 
-    const hasCmp = Boolean(compareSlot && compareSlot.hasData);
+    const hasBase = Boolean(baselineSlot && baselineSlot.hasData);
     const ratioDiff = (key) => {
-      if (!hasCmp) return null;
-      const r = Fmt.ratio(primarySlot[key], compareSlot[key]);
-      return diffNode('比 ' + Fmt.ratioText(r), Fmt.isNum(r) ? r - 100 : null, 'up');
+      if (!hasBase) return null;
+      const r = Fmt.ratio(activeSlot[key], baselineSlot[key]);
+      const prefix = isCompare ? '分析比 ' : '比較比 ';
+      return diffNode(prefix + Fmt.ratioText(r), Fmt.isNum(r) ? r - 100 : null, 'up');
     };
     const rateDiff = (key) => {
-      if (!hasCmp) return null;
-      const d = Fmt.pointDiff(primarySlot[key], compareSlot[key]);
-      return diffNode(Fmt.pointText(d), d, 'down');
+      if (!hasBase) return null;
+      const d = Fmt.pointDiff(activeSlot[key], baselineSlot[key]);
+      const prefix = isCompare ? '分析差 ' : '比較差 ';
+      return diffNode(prefix + Fmt.pointText(d), d, 'down');
     };
 
-    fragment.appendChild(el('div', 'tip-section-label', hasCmp ? '時間帯実績（右: 比較比）' : '時間帯実績'));
-    fragment.appendChild(tipRow('dot-sales', '売上', Fmt.yen(primarySlot.sales), ratioDiff('sales')));
-    fragment.appendChild(tipRow('dot-customers', '客数', Fmt.integer(primarySlot.customers, ' 人'), ratioDiff('customers')));
-    fragment.appendChild(tipRow('dot-items', '打数', Fmt.integer(primarySlot.items, ' 打数'), ratioDiff('items')));
-    fragment.appendChild(tipRow('dot-discount-rate', '値引率', Fmt.percent(primarySlot.discountRate), rateDiff('discountRate')));
-    fragment.appendChild(tipRow('dot-discount', '値引金額', Fmt.yen(primarySlot.discount), ratioDiff('discount')));
-    fragment.appendChild(tipRow('dot-derived', '客単価', Fmt.yen(primarySlot.avgSpend), ratioDiff('avgSpend')));
-    fragment.appendChild(tipRow('dot-derived', '一品単価', Fmt.yen(primarySlot.avgItemPrice), ratioDiff('avgItemPrice')));
+    const sectionTitle = hasBase
+      ? (isCompare ? '時間帯実績（右: 対 分析比）' : '時間帯実績（右: 対 比較比）')
+      : '時間帯実績';
+    fragment.appendChild(el('div', 'tip-section-label', sectionTitle));
+    fragment.appendChild(tipRow('dot-sales', '売上', Fmt.yen(activeSlot.sales), ratioDiff('sales')));
+    fragment.appendChild(tipRow('dot-customers', '客数', Fmt.integer(activeSlot.customers, ' 人'), ratioDiff('customers')));
+    fragment.appendChild(tipRow('dot-items', '打数', Fmt.integer(activeSlot.items, ' 打数'), ratioDiff('items')));
+    fragment.appendChild(tipRow('dot-discount-rate', '値引率', Fmt.percent(activeSlot.discountRate), rateDiff('discountRate')));
+    fragment.appendChild(tipRow('dot-discount', '値引金額', Fmt.yen(activeSlot.discount), ratioDiff('discount')));
+    fragment.appendChild(tipRow('dot-derived', '客単価', Fmt.yen(activeSlot.avgSpend), ratioDiff('avgSpend')));
+    fragment.appendChild(tipRow('dot-derived', '一品単価', Fmt.yen(activeSlot.avgItemPrice), ratioDiff('avgItemPrice')));
 
-    const firstLabel = renderState.primary.totals.firstLabel || primarySlot.label;
-    fragment.appendChild(el('div', 'tip-section-label', '累計（' + firstLabel + ' 〜 ' + primarySlot.label + ' 台）'));
-    fragment.appendChild(tipRow('dot-cum', '売上累計', Fmt.yen(primarySlot.cumSales), ratioDiff('cumSales')));
-    fragment.appendChild(tipRow('dot-cum', '客数累計', Fmt.integer(primarySlot.cumCustomers, ' 人'), ratioDiff('cumCustomers')));
-    fragment.appendChild(tipRow('dot-cum', '打数累計', Fmt.integer(primarySlot.cumItems, ' 打数'), ratioDiff('cumItems')));
-    fragment.appendChild(tipRow('dot-cum', '値引累計', Fmt.yen(primarySlot.cumDiscount), ratioDiff('cumDiscount')));
-    fragment.appendChild(tipRow('dot-cum', '値引累計率', Fmt.percent(primarySlot.cumDiscountRate), rateDiff('cumDiscountRate')));
+    const firstLabel = activeDS.totals.firstLabel || activeSlot.label;
+    fragment.appendChild(el('div', 'tip-section-label', '累計（' + firstLabel + ' 〜 ' + activeSlot.label + ' 台）'));
+    fragment.appendChild(tipRow('dot-cum', '売上累計', Fmt.yen(activeSlot.cumSales), ratioDiff('cumSales')));
+    fragment.appendChild(tipRow('dot-cum', '客数累計', Fmt.integer(activeSlot.cumCustomers, ' 人'), ratioDiff('cumCustomers')));
+    fragment.appendChild(tipRow('dot-cum', '打数累計', Fmt.integer(activeSlot.cumItems, ' 打数'), ratioDiff('cumItems')));
+    fragment.appendChild(tipRow('dot-cum', '値引累計', Fmt.yen(activeSlot.cumDiscount), ratioDiff('cumDiscount')));
+    fragment.appendChild(tipRow('dot-cum', '値引累計率', Fmt.percent(activeSlot.cumDiscountRate), rateDiff('cumDiscountRate')));
 
-    if (renderState.compare && !hasCmp) {
-      fragment.appendChild(el('div', 'tip-section-label', '比較データ: この時間帯のデータなし'));
+    if (baselineDS && !hasBase) {
+      fragment.appendChild(el('div', 'tip-section-label', (isCompare ? '分析データ' : '比較データ') + ': この時間帯のデータなし'));
     }
     return fragment;
   }
@@ -287,7 +305,7 @@
     if (!tip) return;
     tip.classList.remove('visible');
     tip.setAttribute('aria-hidden', 'true');
-    renderState.lastTooltipIndex = null;
+    renderState.lastTooltipKey = null;
   }
 
   function externalTooltipHandler(context) {
@@ -300,11 +318,16 @@
       return;
     }
 
-    const index = tooltip.dataPoints[0].dataIndex;
-    // マウス移動ごとの DOM 再構築を避け、時間帯が変わった時だけ作り直す
-    if (renderState.lastTooltipIndex !== index) {
-      tip.replaceChildren(buildTooltipContent(index));
-      renderState.lastTooltipIndex = index;
+    const firstPt = tooltip.dataPoints[0];
+    const index = firstPt.dataIndex;
+    const dataset = context.chart.data.datasets[firstPt.datasetIndex];
+    const targetSeries = (dataset && dataset.series === 'compare' && renderState.compare) ? 'compare' : 'main';
+
+    const cacheKey = index + '_' + targetSeries;
+    // 指している系列（分析／比較）または時間帯が変わった時だけ再構築
+    if (renderState.lastTooltipKey !== cacheKey) {
+      tip.replaceChildren(buildTooltipContent(index, targetSeries));
+      renderState.lastTooltipKey = cacheKey;
     }
 
     const wrapper = tip.parentElement;
@@ -361,7 +384,7 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: { duration: 650, easing: 'easeOutQuart' },
-        interaction: { mode: 'index', intersect: false },
+        interaction: { mode: 'nearest', intersect: false },
         onHover(event, elements) {
           const index = elements.length ? elements[0].index : null;
           if (index !== renderState.highlightIndex) {

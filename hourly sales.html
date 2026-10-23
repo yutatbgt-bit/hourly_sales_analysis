@@ -53,7 +53,10 @@
             <p>分析データアップロード</p>
           </label>
           <input type="file" id="file-input-main" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="分析データCSVファイル選択（複数選択可）">
-          <span id="file-name-main" class="file-pill pill-compare hidden">分析: 未読込</span>
+          <div class="file-pill-group" id="file-pill-group-main">
+            <button type="button" id="file-name-main" class="file-pill pill-compare hidden" title="クリックしてファイル一覧・個別削除を開く">分析: 未読込</button>
+            <button type="button" id="btn-clear-main" class="file-pill-clear hidden" title="分析データをクリア" aria-label="分析データをクリア">×</button>
+          </div>
         </div>
 
         <!-- 比較データ (任意・複数選択可) -->
@@ -67,7 +70,10 @@
             <p>比較データアップロード</p>
           </label>
           <input type="file" id="file-input-compare" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="比較データCSVファイル選択（複数選択可）">
-          <span id="file-name-compare" class="file-pill pill-base hidden">比較: 未読込</span>
+          <div class="file-pill-group" id="file-pill-group-compare">
+            <button type="button" id="file-name-compare" class="file-pill pill-base hidden" title="クリックしてファイル一覧・個別削除を開く">比較: 未読込</button>
+            <button type="button" id="btn-clear-compare" class="file-pill-clear hidden" title="比較データをクリア" aria-label="比較データをクリア">×</button>
+          </div>
         </div>
 
         <button type="button" id="btn-export-png" class="btn btn-accent" title="現在のグラフを高解像度PNG画像として保存します" disabled>
@@ -127,6 +133,7 @@
       <article class="kpi-card sales" data-metric="sales">
         <div class="kpi-title" id="kpi-sales-label">売上実績</div>
         <div id="kpi-sales" class="kpi-value">-</div>
+        <div id="kpi-sales-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-sales-sub" class="kpi-subtext">ピーク: -</div>
         <div id="kpi-sales-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-sales" aria-hidden="true"></canvas></div>
@@ -136,6 +143,7 @@
       <article class="kpi-card count" data-metric="customers">
         <div class="kpi-title" id="kpi-customers-label">客数実績</div>
         <div id="kpi-customers" class="kpi-value">-</div>
+        <div id="kpi-customers-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-customers-sub" class="kpi-subtext">ピーク: -</div>
         <div id="kpi-customers-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-customers" aria-hidden="true"></canvas></div>
@@ -145,6 +153,7 @@
       <article class="kpi-card items" data-metric="items">
         <div class="kpi-title" id="kpi-items-label">買上打数</div>
         <div id="kpi-items" class="kpi-value">-</div>
+        <div id="kpi-items-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-items-sub" class="kpi-subtext">買上打数: - 打数/人</div>
         <div id="kpi-items-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-items" aria-hidden="true"></canvas></div>
@@ -154,6 +163,7 @@
       <article class="kpi-card price" data-metric="price">
         <div class="kpi-title">客単価 ／ 一品単価</div>
         <div id="kpi-avg-spend" class="kpi-value">-</div>
+        <div id="kpi-avg-spend-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-avg-price-sub" class="kpi-subtext">一品単価: -</div>
         <div id="kpi-price-badge" class="kpi-badge-slot"></div>
       </article>
@@ -162,6 +172,7 @@
       <article class="kpi-card discount" data-metric="discountRate">
         <div class="kpi-title">値引率 ／ 値引金額</div>
         <div id="kpi-discount-rate" class="kpi-value">-</div>
+        <div id="kpi-discount-rate-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-discount-rate-sub" class="kpi-subtext">値引額: - ／ 最大: -</div>
         <div id="kpi-discount-rate-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-discount-rate" aria-hidden="true"></canvas></div>
@@ -171,6 +182,7 @@
       <article class="kpi-card peak-split" data-metric="peaks">
         <div class="kpi-title" id="kpi-peak-split-title">朝 ／ 昼 ／ 夜 売上構成比</div>
         <div id="kpi-peak-split" class="kpi-value">-</div>
+        <div id="kpi-peak-split-compare" class="kpi-compare-val hidden"></div>
         <div id="kpi-peak-split-sub" class="kpi-subtext">朝 - ／ 昼 - ／ 夜 -</div>
         <div id="kpi-peak-split-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-peak-split" aria-hidden="true"></canvas></div>
@@ -253,8 +265,19 @@
     <!-- データ一覧テーブル -->
     <section id="table-container" class="table-card" aria-labelledby="table-main-title">
       <div class="table-header-bar">
-        <h2 id="table-main-title" class="table-title">時間帯別データ一覧</h2>
-        <p class="table-hint">列見出しクリックで並べ替え ／ 行にカーソルを合わせるとグラフが連動します</p>
+        <div class="table-title-group">
+          <h2 id="table-main-title" class="table-title">時間帯別データ一覧</h2>
+          <!-- 分析データ / 比較データ 切り替えトグル (比較データ読込時のみ表示) -->
+          <div class="table-view-toggle hidden" id="table-view-toggle" role="group" aria-label="テーブル表示データの切り替え">
+            <button type="button" class="btn-table-view active" data-view="primary" id="btn-table-view-primary">
+              分析データ
+            </button>
+            <button type="button" class="btn-table-view" data-view="compare" id="btn-table-view-compare">
+              比較データ
+            </button>
+          </div>
+        </div>
+        <p class="table-hint" id="table-hint">列見出しクリックで並べ替え ／ 行にカーソルを合わせるとグラフが連動します</p>
       </div>
       <div class="table-responsive">
         <table class="data-table" id="data-table">
@@ -271,6 +294,45 @@
       データはブラウザ内のIndexedDBに保存され、外部サーバへは一切送信されません。
     </footer>
   </main>
+
+  <!-- アップロードファイル管理ダイアログ (個別選択・クリア) -->
+  <dialog id="file-manager-dialog" class="file-manager-dialog" aria-labelledby="file-manager-title">
+    <div class="file-manager-content">
+      <div class="file-manager-header">
+        <div class="file-manager-heading">
+          <h3 id="file-manager-title" class="file-manager-title">ファイル一覧</h3>
+          <p id="file-manager-subtitle" class="file-manager-subtitle">アップロードされたファイルの一覧と個別削除</p>
+        </div>
+        <button type="button" id="btn-close-file-manager" class="dialog-close-btn" aria-label="閉じる">×</button>
+      </div>
+
+      <div class="file-manager-toolbar">
+        <label class="file-manager-select-all">
+          <input type="checkbox" id="cb-select-all-files">
+          <span>すべて選択</span>
+        </label>
+        <div class="file-manager-actions">
+          <button type="button" id="btn-delete-selected-files" class="btn btn-secondary btn-sm" disabled>
+            選択したファイルを削除
+          </button>
+          <button type="button" id="btn-clear-slot-all" class="btn btn-danger-subtle btn-sm">
+            このスロットを全クリア
+          </button>
+        </div>
+      </div>
+
+      <div id="file-manager-list" class="file-manager-list" role="list"></div>
+
+      <div class="file-manager-footer">
+        <button type="button" id="btn-add-more-files" class="btn btn-secondary btn-sm" title="このスロットにさらにCSVファイルを追加">
+          ＋ ファイルを追加
+        </button>
+        <button type="button" id="btn-file-manager-done" class="btn btn-accent btn-sm">
+          完了
+        </button>
+      </div>
+    </div>
+  </dialog>
 
   <script src="vendor/chart.umd.min.js"></script>
   <script src="js/format.js"></script>

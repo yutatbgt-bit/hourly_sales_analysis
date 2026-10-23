@@ -86,12 +86,20 @@
     { key: 'cmpDiscountRate', label: '値引率 差',   source: 'discountRate', mode: 'point' }
   ]);
 
+  const PRIMARY_COMPARE_COLUMNS = Object.freeze([
+    { key: 'cmpSales',        label: '売上 分析比', source: 'sales',        mode: 'ratio' },
+    { key: 'cmpCustomers',    label: '客数 分析比', source: 'customers',    mode: 'ratio' },
+    { key: 'cmpItems',        label: '打数 分析比', source: 'items',        mode: 'ratio' },
+    { key: 'cmpDiscountRate', label: '値引率 差',   source: 'discountRate', mode: 'point' }
+  ]);
+
   const state = {
     rawMainFiles: [],     // アップロードされた個別の解析済みデータセット配列
     rawCompareFiles: [],  // 比較スロットのデータセット配列
     aggMode: 'sum',       // 'sum' | 'avg'
     primary: null,        // 集約済みメインデータセット
     compare: null,        // 集約済み比較データセット
+    tableView: 'primary', // 'primary' | 'compare' (テーブルに表示する対象)
     timeBands: JSON.parse(JSON.stringify(DEFAULT_TIME_BANDS)),
     visibility: { sales: true, customers: true, items: true, discountRate: true, discount: false },
     sort: { key: 'hour', direction: 'asc' },
@@ -110,14 +118,21 @@
   function cacheDom() {
     const ids = [
       'status-message', 'file-input-main', 'file-input-compare', 'file-name-main', 'file-name-compare',
+      'btn-clear-main', 'btn-clear-compare',
       'drop-zone-main', 'drop-zone-compare', 'btn-mode-sum', 'btn-mode-avg', 'btn-export-png',
       'btn-toggle-table', 'btn-reset-data', 'btn-fullscreen', 'btn-theme-toggle', 'chart-main-title',
       'chart-sub-title', 'chart-wrapper', 'chart-placeholder', 'main-chart-canvas', 'chart-tooltip',
       'compare-legend', 'legend-main-label', 'legend-compare-label', 'share-section', 'share-bar',
       'share-legend', 'btn-toggle-band-settings', 'band-settings-panel', 'band-list', 'btn-add-band',
       'btn-close-band-settings', 'table-container', 'table-header-row', 'table-body', 'table-foot',
+      'table-main-title', 'table-hint', 'table-view-toggle', 'btn-table-view-primary', 'btn-table-view-compare',
       'kpi-sales-label', 'kpi-customers-label', 'kpi-items-label', 'kpi-peak-split', 'kpi-peak-split-sub',
-      'kpi-peak-split-badge'
+      'kpi-peak-split-badge',
+      'kpi-sales-compare', 'kpi-customers-compare', 'kpi-items-compare',
+      'kpi-avg-spend-compare', 'kpi-discount-rate-compare', 'kpi-peak-split-compare',
+      'file-manager-dialog', 'file-manager-title', 'file-manager-subtitle', 'btn-close-file-manager',
+      'cb-select-all-files', 'btn-delete-selected-files', 'btn-clear-slot-all', 'file-manager-list',
+      'btn-add-more-files', 'btn-file-manager-done'
     ];
     ids.forEach((id) => {
       const node = document.getElementById(id);
@@ -133,12 +148,20 @@
     setupDropZone(dom['drop-zone-compare'], dom['file-input-compare'], 'compare');
     setupPlaceholderDrop();
     preventWindowFileDrop();
+    setupFileManagerEvents();
 
     if (dom['btn-mode-sum']) {
       dom['btn-mode-sum'].addEventListener('click', () => setAggMode('sum'));
     }
     if (dom['btn-mode-avg']) {
       dom['btn-mode-avg'].addEventListener('click', () => setAggMode('avg'));
+    }
+
+    if (dom['btn-table-view-primary']) {
+      dom['btn-table-view-primary'].addEventListener('click', () => setTableView('primary'));
+    }
+    if (dom['btn-table-view-compare']) {
+      dom['btn-table-view-compare'].addEventListener('click', () => setTableView('compare'));
     }
 
     dom['btn-export-png'].addEventListener('click', exportPng);
@@ -537,19 +560,46 @@
       return;
     }
 
-    if (slot === 'main') {
-      state.rawMainFiles = parsedSets;
-    } else {
-      state.rawCompareFiles = parsedSets;
-    }
+    const existingList = slot === 'main' ? state.rawMainFiles : state.rawCompareFiles;
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    parsedSets.forEach((newDs) => {
+      const existingIdx = existingList.findIndex(
+        (oldDs) => oldDs.meta.fileName && oldDs.meta.fileName === newDs.meta.fileName
+      );
+      if (existingIdx >= 0) {
+        existingList[existingIdx] = newDs;
+        updatedCount++;
+      } else {
+        existingList.push(newDs);
+        addedCount++;
+      }
+    });
 
     recomputeAggregates();
     updateDashboard();
     await persistCurrentState();
 
+    // ファイル管理モーダルが開いていればリストも自動更新
+    if (dom['file-manager-dialog'] && dom['file-manager-dialog'].open && activeFileManagerSlot === slot) {
+      renderFileManagerList();
+      if (dom['file-manager-title']) {
+        dom['file-manager-title'].textContent =
+          (slot === 'main' ? '分析データ' : '比較データ') + ' ファイル一覧 (' + existingList.length + '件)';
+      }
+    }
+
     const targetSet = slot === 'main' ? state.primary : state.compare;
     const slotName = slot === 'main' ? '分析データ' : '比較データ';
-    let msg = slotName + '（' + parsedSets.length + 'ファイル）を正常に読み込みました: ' + targetSet.meta.dateLabel;
+    let msg = slotName + 'に ' + parsedSets.length + 'ファイルを読み込みました（合計 ' + existingList.length + '件）: ' + targetSet.meta.dateLabel;
+    if (updatedCount > 0 && addedCount > 0) {
+      msg += ' （新規追加 ' + addedCount + '件 / 更新 ' + updatedCount + '件）';
+    } else if (updatedCount > 0) {
+      msg += ' （同名ファイルを更新 ' + updatedCount + '件）';
+    } else if (existingList.length > parsedSets.length) {
+      msg += ' （追加 ' + addedCount + '件）';
+    }
     if (errors.length > 0) {
       msg += ' (※一部スキップ: ' + errors.join(', ') + ')';
       showStatus(msg, 'warning', 0);
@@ -559,19 +609,311 @@
   }
 
   function updateFilePill(slot, dataSet) {
-    const pill = dom[slot === 'main' ? 'file-name-main' : 'file-name-compare'];
+    const isMain = slot === 'main';
+    const pill = dom[isMain ? 'file-name-main' : 'file-name-compare'];
+    const clearBtn = dom[isMain ? 'btn-clear-main' : 'btn-clear-compare'];
     if (!pill) return;
+
     if (!dataSet) {
-      pill.textContent = slot === 'main' ? '分析: 未読込' : '比較: 未読込';
+      pill.textContent = isMain ? '分析: 未読込' : '比較: 未読込';
       pill.removeAttribute('title');
       pill.classList.add('hidden');
+      if (clearBtn) clearBtn.classList.add('hidden');
       return;
     }
-    const prefix = slot === 'main' ? '分析: ' : '比較: ';
+
+    const prefix = isMain ? '分析: ' : '比較: ';
     const countText = dataSet.fileCount > 1 ? ' (' + dataSet.fileCount + '件)' : '';
     pill.textContent = prefix + dataSet.meta.dateLabel + ' ' + dataSet.meta.storeName + countText;
-    pill.setAttribute('title', dataSet.sourceFiles ? dataSet.sourceFiles.join('\n') : dataSet.meta.fileName);
+    pill.setAttribute(
+      'title',
+      (dataSet.fileCount > 1 ? 'クリックしてファイル一覧・個別クリアを開く\n' : 'クリックしてファイル情報を確認\n') +
+      (dataSet.sourceFiles ? dataSet.sourceFiles.join('\n') : dataSet.meta.fileName)
+    );
     pill.classList.remove('hidden');
+    if (clearBtn) {
+      clearBtn.classList.remove('hidden');
+      clearBtn.setAttribute('title', (isMain ? '分析データ' : '比較データ') + 'をすべてクリア');
+    }
+  }
+
+  function clearSlot(slot) {
+    const isMain = slot === 'main';
+    const rawFiles = isMain ? state.rawMainFiles : state.rawCompareFiles;
+    if (rawFiles.length === 0) return;
+
+    if (isMain) {
+      state.rawMainFiles = [];
+      state.primary = null;
+    } else {
+      state.rawCompareFiles = [];
+      state.compare = null;
+    }
+
+    recomputeAggregates();
+    updateDashboard();
+    persistCurrentState();
+    showStatus((isMain ? '分析データ' : '比較データ') + 'をクリアしました。', 'info');
+  }
+
+  // ---------------------------------------------------------------------------
+  // ファイル管理ダイアログ (個別選択・クリア)
+  // ---------------------------------------------------------------------------
+
+  let activeFileManagerSlot = 'main';
+
+  function setupFileManagerEvents() {
+    if (dom['file-name-main']) {
+      dom['file-name-main'].addEventListener('click', () => openFileManager('main'));
+    }
+    if (dom['file-name-compare']) {
+      dom['file-name-compare'].addEventListener('click', () => openFileManager('compare'));
+    }
+    if (dom['btn-clear-main']) {
+      dom['btn-clear-main'].addEventListener('click', () => clearSlot('main'));
+    }
+    if (dom['btn-clear-compare']) {
+      dom['btn-clear-compare'].addEventListener('click', () => clearSlot('compare'));
+    }
+    if (dom['btn-close-file-manager']) {
+      dom['btn-close-file-manager'].addEventListener('click', closeFileManager);
+    }
+    if (dom['btn-file-manager-done']) {
+      dom['btn-file-manager-done'].addEventListener('click', closeFileManager);
+    }
+    if (dom['btn-add-more-files']) {
+      dom['btn-add-more-files'].addEventListener('click', () => {
+        const input = activeFileManagerSlot === 'main' ? dom['file-input-main'] : dom['file-input-compare'];
+        if (input) input.click();
+      });
+    }
+    if (dom['file-manager-dialog']) {
+      dom['file-manager-dialog'].addEventListener('click', (e) => {
+        if (e.target === dom['file-manager-dialog']) closeFileManager();
+      });
+      dom['file-manager-dialog'].addEventListener('cancel', closeFileManager);
+    }
+    if (dom['cb-select-all-files']) {
+      dom['cb-select-all-files'].addEventListener('change', (e) => {
+        const list = dom['file-manager-list'];
+        if (!list) return;
+        const boxes = list.querySelectorAll('.file-item-cb');
+        boxes.forEach((cb) => { cb.checked = e.target.checked; });
+        updateSelectedDeleteButton();
+      });
+    }
+    if (dom['btn-delete-selected-files']) {
+      dom['btn-delete-selected-files'].addEventListener('click', removeSelectedFiles);
+    }
+    if (dom['btn-clear-slot-all']) {
+      dom['btn-clear-slot-all'].addEventListener('click', clearSlotFromDialog);
+    }
+  }
+
+  function openFileManager(slot) {
+    const dialog = dom['file-manager-dialog'];
+    if (!dialog) return;
+
+    activeFileManagerSlot = slot;
+    const isMain = slot === 'main';
+    const rawFiles = isMain ? state.rawMainFiles : state.rawCompareFiles;
+    if (!Array.isArray(rawFiles) || rawFiles.length === 0) return;
+
+    const titleEl = dom['file-manager-title'];
+    const subTitleEl = dom['file-manager-subtitle'];
+    if (titleEl) {
+      titleEl.textContent = (isMain ? '分析データ' : '比較データ') + ' ファイル一覧 (' + rawFiles.length + '件)';
+    }
+    if (subTitleEl) {
+      subTitleEl.textContent = 'チェックしたファイルの一括削除、または行ごとの個別削除が可能です';
+    }
+
+    renderFileManagerList();
+
+    if (dom['cb-select-all-files']) {
+      dom['cb-select-all-files'].checked = false;
+    }
+    updateSelectedDeleteButton();
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+  }
+
+  function closeFileManager() {
+    const dialog = dom['file-manager-dialog'];
+    if (!dialog) return;
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  function renderFileManagerList() {
+    const list = dom['file-manager-list'];
+    if (!list) return;
+    list.replaceChildren();
+
+    const isMain = activeFileManagerSlot === 'main';
+    const rawFiles = isMain ? state.rawMainFiles : state.rawCompareFiles;
+
+    if (rawFiles.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'file-manager-empty';
+      empty.textContent = 'ファイルはありません。';
+      list.appendChild(empty);
+      return;
+    }
+
+    rawFiles.forEach((ds, index) => {
+      const item = document.createElement('div');
+      item.className = 'file-manager-item';
+
+      const left = document.createElement('div');
+      left.className = 'file-manager-item-left';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'file-item-cb';
+      cb.dataset.index = String(index);
+      cb.addEventListener('change', updateSelectedDeleteButton);
+
+      const info = document.createElement('div');
+      info.className = 'file-item-info';
+
+      const name = document.createElement('div');
+      name.className = 'file-item-name';
+      name.textContent = ds.meta.fileName || ('ファイル ' + (index + 1));
+      name.title = ds.meta.fileName || '';
+
+      const meta = document.createElement('div');
+      meta.className = 'file-item-meta';
+
+      if (ds.meta.dateLabel) {
+        const spanDate = document.createElement('span');
+        spanDate.className = 'file-item-badge';
+        spanDate.textContent = ds.meta.dateLabel;
+        meta.appendChild(spanDate);
+      }
+      if (ds.meta.storeName) {
+        const spanStore = document.createElement('span');
+        spanStore.className = 'file-item-badge';
+        spanStore.textContent = ds.meta.storeName;
+        meta.appendChild(spanStore);
+      }
+      if (ds.totals && Fmt.isNum(ds.totals.sales)) {
+        const spanSales = document.createElement('span');
+        spanSales.className = 'file-item-badge';
+        spanSales.textContent = '売上: ' + Fmt.yen(ds.totals.sales);
+        meta.appendChild(spanSales);
+      }
+      if (ds.totals && Fmt.isNum(ds.totals.customers)) {
+        const spanCust = document.createElement('span');
+        spanCust.className = 'file-item-badge';
+        spanCust.textContent = '客数: ' + Fmt.integer(ds.totals.customers, ' 人');
+        meta.appendChild(spanCust);
+      }
+
+      info.append(name, meta);
+      left.append(cb, info);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn-remove-single-file';
+      removeBtn.textContent = '削除';
+      removeBtn.title = (ds.meta.fileName || 'このファイル') + ' を削除';
+      removeBtn.addEventListener('click', () => {
+        removeSingleFile(index);
+      });
+
+      item.append(left, removeBtn);
+      list.appendChild(item);
+    });
+  }
+
+  function updateSelectedDeleteButton() {
+    const list = dom['file-manager-list'];
+    const deleteBtn = dom['btn-delete-selected-files'];
+    if (!list || !deleteBtn) return;
+
+    const checkedBoxes = list.querySelectorAll('.file-item-cb:checked');
+    const count = checkedBoxes.length;
+    deleteBtn.disabled = count === 0;
+    deleteBtn.textContent = count > 0 ? '選択したファイルを削除 (' + count + '件)' : '選択したファイルを削除';
+  }
+
+  function removeSingleFile(index) {
+    const isMain = activeFileManagerSlot === 'main';
+    const rawFiles = isMain ? state.rawMainFiles : state.rawCompareFiles;
+    if (index < 0 || index >= rawFiles.length) return;
+
+    const removedName = rawFiles[index].meta.fileName || 'ファイル';
+    rawFiles.splice(index, 1);
+
+    recomputeAggregates();
+    updateDashboard();
+    persistCurrentState();
+
+    if (rawFiles.length === 0) {
+      closeFileManager();
+      showStatus((isMain ? '分析データ' : '比較データ') + 'のファイルをすべて削除しました。', 'info');
+    } else {
+      renderFileManagerList();
+      if (dom['file-manager-title']) {
+        dom['file-manager-title'].textContent =
+          (isMain ? '分析データ' : '比較データ') + ' ファイル一覧 (' + rawFiles.length + '件)';
+      }
+      updateSelectedDeleteButton();
+      showStatus(removedName + ' を削除しました。（残り ' + rawFiles.length + '件）', 'info');
+    }
+  }
+
+  function removeSelectedFiles() {
+    const list = dom['file-manager-list'];
+    if (!list) return;
+
+    const checkedBoxes = Array.from(list.querySelectorAll('.file-item-cb:checked'));
+    if (checkedBoxes.length === 0) return;
+
+    const isMain = activeFileManagerSlot === 'main';
+    const rawFiles = isMain ? state.rawMainFiles : state.rawCompareFiles;
+
+    const indicesToDelete = new Set(checkedBoxes.map((cb) => Number(cb.dataset.index)));
+    const remaining = rawFiles.filter((_, idx) => !indicesToDelete.has(idx));
+
+    if (isMain) {
+      state.rawMainFiles = remaining;
+    } else {
+      state.rawCompareFiles = remaining;
+    }
+
+    recomputeAggregates();
+    updateDashboard();
+    persistCurrentState();
+
+    const deletedCount = checkedBoxes.length;
+    if (remaining.length === 0) {
+      closeFileManager();
+      showStatus((isMain ? '分析データ' : '比較データ') + 'のファイルをすべて削除しました。', 'info');
+    } else {
+      renderFileManagerList();
+      if (dom['file-manager-title']) {
+        dom['file-manager-title'].textContent =
+          (isMain ? '分析データ' : '比較データ') + ' ファイル一覧 (' + remaining.length + '件)';
+      }
+      if (dom['cb-select-all-files']) dom['cb-select-all-files'].checked = false;
+      updateSelectedDeleteButton();
+      showStatus(deletedCount + '件のファイルを削除しました。（残り ' + remaining.length + '件）', 'info');
+    }
+  }
+
+  function clearSlotFromDialog() {
+    const isMain = activeFileManagerSlot === 'main';
+    clearSlot(activeFileManagerSlot);
+    closeFileManager();
   }
 
   // ---------------------------------------------------------------------------
@@ -588,6 +930,16 @@
     dom['share-section'].classList.toggle('hidden', !hasData);
     dom['compare-legend'].classList.toggle('hidden', !compare);
     dom['btn-export-png'].disabled = !hasData;
+
+    if (dom['table-view-toggle']) {
+      dom['table-view-toggle'].classList.toggle('hidden', !compare);
+    }
+    if (!compare && state.tableView !== 'primary') {
+      state.tableView = 'primary';
+      if (dom['btn-table-view-primary']) dom['btn-table-view-primary'].classList.add('active');
+      if (dom['btn-table-view-compare']) dom['btn-table-view-compare'].classList.remove('active');
+      if (dom['table-main-title']) dom['table-main-title'].textContent = '時間帯別 実績一覧';
+    }
 
     if (!hasData) {
       HourlyChart.destroyAll();
@@ -638,6 +990,31 @@
   function setText(id, text) {
     const node = document.getElementById(id);
     if (node) node.textContent = text;
+  }
+
+  function setCompareText(id, text) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.replaceChildren();
+    if (!text) {
+      node.classList.add('hidden');
+      return;
+    }
+    const tag = document.createElement('span');
+    tag.className = 'kpi-compare-tag';
+    tag.textContent = '[比較]';
+    const val = document.createElement('span');
+    val.className = 'kpi-compare-num';
+    val.textContent = ' ' + text;
+    node.append(tag, val);
+    node.classList.remove('hidden');
+  }
+
+  function hideCompareText(id) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.replaceChildren();
+    node.classList.add('hidden');
   }
 
   function renderBadge(slotId, numericDiff, text, goodDirection) {
@@ -692,7 +1069,7 @@
     // 6. ピーク構成比連動
     renderKpiPeakSplit(primary, compare);
 
-    // 比較バッジ (1〜5)
+    // 比較バッジおよび比較数値 (1〜5)
     if (compare) {
       const c = compare.totals;
       const ratioBadge = (id, cur, base) => {
@@ -706,9 +1083,18 @@
 
       const d = Fmt.pointDiff(t.discountRate, c.discountRate);
       renderBadge('kpi-discount-rate-badge', d, '比較差 ' + Fmt.pointText(d), 'down');
+
+      // 比較データの実績数値を表示
+      setCompareText('kpi-sales-compare', Fmt.yen(c.sales));
+      setCompareText('kpi-customers-compare', Fmt.integer(c.customers, ' 人'));
+      setCompareText('kpi-items-compare', Fmt.integer(c.items, ' 打数'));
+      setCompareText('kpi-avg-spend-compare', '客単価: ' + Fmt.yen(c.avgSpend) + ' ／ 一品: ' + Fmt.yen(c.avgItemPrice));
+      setCompareText('kpi-discount-rate-compare', '値引率: ' + Fmt.percent(c.discountRate) + '（' + Fmt.yen(c.discount) + '）');
     } else {
       ['kpi-sales-badge', 'kpi-customers-badge', 'kpi-items-badge', 'kpi-price-badge', 'kpi-discount-rate-badge']
         .forEach((id) => renderBadge(id, null, null));
+      ['kpi-sales-compare', 'kpi-customers-compare', 'kpi-items-compare', 'kpi-avg-spend-compare', 'kpi-discount-rate-compare']
+        .forEach(hideCompareText);
     }
 
     // スパークライン
@@ -743,6 +1129,7 @@
         ? '有効な時間帯区分がありません'
         : activeBands.map((b) => b.name + ' -').join(' ／ ');
       setText('kpi-peak-split-sub', emptySub);
+      hideCompareText('kpi-peak-split-compare');
       renderBadge('kpi-peak-split-badge', null, null);
       HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), []);
       return;
@@ -769,6 +1156,16 @@
 
     if (compare && compare.totals.sales > 0 && bandStats.length > 0) {
       const cTotal = compare.totals.sales;
+      const cBandStats = activeBands.map((b) => {
+        const sales = compare.slots
+          .filter((s) => s.hasData && s.hour >= b.from && s.hour <= b.to)
+          .reduce((acc, s) => acc + (s.sales ?? 0), 0);
+        const share = cTotal > 0 ? (sales / cTotal) * 100 : 0;
+        return { band: b, sales, share };
+      });
+      const cTextVal = cBandStats.map((st) => st.band.name + ' ' + st.share.toFixed(1) + '%').join(' ／ ');
+      setCompareText('kpi-peak-split-compare', cTextVal);
+
       // 最も売上構成比の高い主力区分で比率差を算出
       const primaryLead = [...bandStats].sort((a, b) => b.sales - a.sales)[0];
       const leadBand = primaryLead.band;
@@ -784,6 +1181,7 @@
         'up'
       );
     } else {
+      hideCompareText('kpi-peak-split-compare');
       renderBadge('kpi-peak-split-badge', null, null);
     }
   }
@@ -799,6 +1197,8 @@
     setText('kpi-peak-split-sub', '朝 - ／ 昼 - ／ 夜 -');
     ['kpi-sales-badge', 'kpi-customers-badge', 'kpi-items-badge', 'kpi-price-badge', 'kpi-discount-rate-badge', 'kpi-peak-split-badge']
       .forEach((id) => renderBadge(id, null, null));
+    ['kpi-sales-compare', 'kpi-customers-compare', 'kpi-items-compare', 'kpi-avg-spend-compare', 'kpi-discount-rate-compare', 'kpi-peak-split-compare']
+      .forEach(hideCompareText);
     HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), []);
   }
 
@@ -850,8 +1250,27 @@
   // テーブル
   // ---------------------------------------------------------------------------
 
+  function setTableView(view) {
+    if (state.tableView === view) return;
+    state.tableView = view;
+    if (dom['btn-table-view-primary']) {
+      dom['btn-table-view-primary'].classList.toggle('active', view === 'primary');
+    }
+    if (dom['btn-table-view-compare']) {
+      dom['btn-table-view-compare'].classList.toggle('active', view === 'compare');
+    }
+    if (dom['table-main-title']) {
+      dom['table-main-title'].textContent = view === 'compare' ? '時間帯別 実績一覧（比較データ）' : '時間帯別 実績一覧（分析データ）';
+    }
+    renderTableHeader();
+    renderTable();
+  }
+
   function activeColumns() {
-    return state.compare && state.primary ? TABLE_COLUMNS.concat(COMPARE_COLUMNS) : TABLE_COLUMNS;
+    if (!state.compare || !state.primary) return TABLE_COLUMNS;
+    return state.tableView === 'compare'
+      ? TABLE_COLUMNS.concat(PRIMARY_COMPARE_COLUMNS)
+      : TABLE_COLUMNS.concat(COMPARE_COLUMNS);
   }
 
   function renderTableHeader() {
@@ -898,23 +1317,24 @@
     persistCurrentState();
   }
 
-  function compareValue(slot, col, compareSlot) {
+  function compareValue(slot, col, otherSlot) {
     if (!col.source) return slot[col.key];
-    if (!compareSlot || !compareSlot.hasData || !slot.hasData) return null;
+    if (!otherSlot || !otherSlot.hasData || !slot.hasData) return null;
     return col.mode === 'ratio'
-      ? Fmt.ratio(slot[col.source], compareSlot[col.source])
-      : Fmt.pointDiff(slot[col.source], compareSlot[col.source]);
+      ? Fmt.ratio(slot[col.source], otherSlot[col.source])
+      : Fmt.pointDiff(slot[col.source], otherSlot[col.source]);
   }
 
   function sortedSlotIndexes() {
-    const primary = state.primary;
-    const compare = state.compare;
+    const isCompareView = state.tableView === 'compare' && state.compare;
+    const currentDS = isCompareView ? state.compare : state.primary;
+    const otherDS = isCompareView ? state.primary : state.compare;
     const col = activeColumns().find((c) => c.key === state.sort.key) || TABLE_COLUMNS[0];
-    const indexes = primary.slots.map((_, i) => i);
+    const indexes = currentDS.slots.map((_, i) => i);
     if (col.key === 'hour') {
       return state.sort.direction === 'asc' ? indexes : indexes.reverse();
     }
-    const valueOf = (i) => compareValue(primary.slots[i], col, compare ? compare.slots[i] : null);
+    const valueOf = (i) => compareValue(currentDS.slots[i], col, otherDS ? otherDS.slots[i] : null);
     const factor = state.sort.direction === 'asc' ? 1 : -1;
     return indexes.sort((a, b) => {
       const va = valueOf(a);
@@ -951,18 +1371,23 @@
   function renderTable() {
     const primary = state.primary;
     const compare = state.compare;
+    const isCompareView = state.tableView === 'compare' && compare;
+    const currentDS = isCompareView ? compare : primary;
+    const otherDS = isCompareView ? primary : compare;
+    const cmpCols = isCompareView ? PRIMARY_COMPARE_COLUMNS : COMPARE_COLUMNS;
+
     const body = dom['table-body'];
     if (!body) return;
     body.replaceChildren();
     rowByIndex.clear();
 
     const maxima = {};
-    TABLE_COLUMNS.forEach((col) => { if (col.heat) maxima[col.key] = columnMax(primary.slots, col.key); });
-    const peakSalesIndex = primary.totals.peak.sales ? primary.totals.peak.sales.index : null;
+    TABLE_COLUMNS.forEach((col) => { if (col.heat) maxima[col.key] = columnMax(currentDS.slots, col.key); });
+    const peakSalesIndex = currentDS.totals.peak.sales ? currentDS.totals.peak.sales.index : null;
 
     sortedSlotIndexes().forEach((index) => {
-      const slot = primary.slots[index];
-      const compareSlot = compare ? compare.slots[index] : null;
+      const slot = currentDS.slots[index];
+      const otherSlot = otherDS ? otherDS.slots[index] : null;
       const tr = document.createElement('tr');
       tr.dataset.index = String(index);
       tr.tabIndex = 0;
@@ -973,7 +1398,7 @@
         const mark = document.createElement('span');
         mark.className = 'peak-mark';
         mark.textContent = 'PEAK';
-        mark.setAttribute('title', '売上ピーク時間帯');
+        mark.setAttribute('title', (isCompareView ? '比較' : '分析') + '売上ピーク時間帯');
         timeCell.appendChild(mark);
       }
       tr.appendChild(timeCell);
@@ -991,9 +1416,9 @@
         tr.appendChild(td);
       });
 
-      if (compare) {
-        COMPARE_COLUMNS.forEach((col, i) => {
-          const td = cmpCell(compareValue(slot, col, compareSlot), col);
+      if (otherDS) {
+        cmpCols.forEach((col, i) => {
+          const td = cmpCell(compareValue(slot, col, otherSlot), col);
           if (i === 0) td.classList.add('td-cum-first');
           tr.appendChild(td);
         });
@@ -1007,15 +1432,15 @@
       body.appendChild(tr);
     });
 
-    renderTableFooter(primary, compare);
+    renderTableFooter(currentDS, otherDS, cmpCols);
   }
 
-  function renderTableFooter(primary, compare) {
+  function renderTableFooter(currentDS, otherDS, cmpCols) {
     const foot = dom['table-foot'];
     if (!foot) return;
     foot.replaceChildren();
-    const t = primary.totals;
-    const lastActive = primary.slots.filter((s) => s.hasData).pop();
+    const t = currentDS.totals;
+    const lastActive = currentDS.slots.filter((s) => s.hasData).pop();
 
     const totalsByKey = {
       sales: t.sales,
@@ -1038,9 +1463,9 @@
       if (col.key === 'cumSales') classes.push('td-cum-first');
       tr.appendChild(createCell(col.format(totalsByKey[col.key]), classes.join(' ')));
     });
-    if (compare) {
-      const c = compare.totals;
-      COMPARE_COLUMNS.forEach((col, i) => {
+    if (otherDS && cmpCols) {
+      const c = otherDS.totals;
+      cmpCols.forEach((col, i) => {
         const value = col.mode === 'ratio' ? Fmt.ratio(t[col.source], c[col.source]) : Fmt.pointDiff(t[col.source], c[col.source]);
         const td = cmpCell(value, col);
         if (i === 0) td.classList.add('td-cum-first');
