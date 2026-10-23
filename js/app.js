@@ -744,6 +744,7 @@
         : activeBands.map((b) => b.name + ' -').join(' ／ ');
       setText('kpi-peak-split-sub', emptySub);
       renderBadge('kpi-peak-split-badge', null, null);
+      HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), []);
       return;
     }
 
@@ -762,6 +763,9 @@
 
     setTextWithPop('kpi-peak-split', textVal);
     setText('kpi-peak-split-sub', subVal);
+
+    // 時間帯区分に色分けした横棒グラフ（スパークライン）を描画
+    HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), bandStats);
 
     if (compare && compare.totals.sales > 0 && bandStats.length > 0) {
       const cTotal = compare.totals.sales;
@@ -795,6 +799,7 @@
     setText('kpi-peak-split-sub', '朝 - ／ 昼 - ／ 夜 -');
     ['kpi-sales-badge', 'kpi-customers-badge', 'kpi-items-badge', 'kpi-price-badge', 'kpi-discount-rate-badge', 'kpi-peak-split-badge']
       .forEach((id) => renderBadge(id, null, null));
+    HourlyChart.renderBandSparkline(document.getElementById('spark-peak-split'), []);
   }
 
   function renderShareBar(primary) {

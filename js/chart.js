@@ -467,6 +467,66 @@
     sparkCharts.set(canvas.id, chart);
   }
 
+  /** 売上構成比カード用横棒グラフ (時間帯区分ごとに色分けした100%積み上げ横棒) */
+  function renderBandSparkline(canvas, bandStats) {
+    if (!(canvas instanceof HTMLCanvasElement)) return;
+    const existing = sparkCharts.get(canvas.id);
+    if (existing) {
+      existing.destroy();
+      sparkCharts.delete(canvas.id);
+    }
+
+    const activeStats = (bandStats || []).filter((st) => st.sales > 0);
+    const totalSales = activeStats.reduce((acc, st) => acc + st.sales, 0);
+    if (totalSales <= 0) return;
+
+    const count = activeStats.length;
+    const datasets = activeStats.map((st, i) => {
+      let borderRadius = 0;
+      if (count === 1) {
+        borderRadius = 4;
+      } else if (i === 0) {
+        borderRadius = { topLeft: 4, bottomLeft: 4, topRight: 0, bottomRight: 0 };
+      } else if (i === count - 1) {
+        borderRadius = { topRight: 4, bottomRight: 4, topLeft: 0, bottomLeft: 0 };
+      }
+
+      return {
+        label: st.band.name,
+        data: [(st.sales / totalSales) * 100],
+        backgroundColor: st.band.color || '#38bdf8',
+        borderWidth: 0,
+        barThickness: 16,
+        borderRadius
+      };
+    });
+
+    const chart = new global.Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: ['構成比'],
+        datasets
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 400 },
+        events: [],
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: false }
+        },
+        scales: {
+          x: { display: false, stacked: true, min: 0, max: 100 },
+          y: { display: false, stacked: true }
+        },
+        layout: { padding: { top: 8, bottom: 4, left: 0, right: 0 } }
+      }
+    });
+    sparkCharts.set(canvas.id, chart);
+  }
+
   /**
    * テーマ背景とタイトルを付与した高解像度 PNG を保存する。
    * @param {string} fileName 無害化済みファイル名
@@ -529,6 +589,7 @@
     METRICS,
     renderMain: renderMainChart,
     renderSparkline,
+    renderBandSparkline,
     setMetricVisibility,
     highlightIndex,
     exportImage: exportChartImage,
