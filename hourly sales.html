@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    Content Security Policy:
+    - 外部スクリプトを完全遮断 (script-src 'self')
+    - inline style 属性を一切使わない設計のため style-src から 'unsafe-inline' を除外
+    - 通信処理を持たないため connect-src は 'none' (default-src 継承)
+    ※ frame-ancestors は meta 指定では無効のため、app.js 側でフレーム内表示を拒否する
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>時間帯別売上分析</title>
+  <meta name="description" content="時間帯別実績CSVを読み込み、08:00〜23:00の時間帯ごとに売上・客数・打数・値引率をグラフと表で可視化するローカル売上分析ダッシュボード">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-title">
+        <div class="header-title-text">
+          <h1>時間帯別売上分析</h1>
+        </div>
+      </div>
+
+      <div class="upload-section">
+        <!-- 集計モード切り替え (合算 / 平均) -->
+        <div class="mode-toggle-group" role="group" aria-label="複数ファイル集約モード切り替え">
+          <button type="button" id="btn-mode-sum" class="btn-mode active" title="複数ファイルを合算（合計値）して表示します">
+            合算
+          </button>
+          <button type="button" id="btn-mode-avg" class="btn-mode" title="複数ファイルを平均（1ファイル/日あたり）して表示します">
+            平均
+          </button>
+        </div>
+
+        <!-- 分析データ (メイン・複数選択可) -->
+        <div class="upload-group">
+          <label for="file-input-main" class="file-drop-zone drop-zone-compare" id="drop-zone-main" role="button" tabindex="0" aria-label="分析データCSVをアップロード（複数可）">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-compare" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>分析データアップロード</p>
+          </label>
+          <input type="file" id="file-input-main" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="分析データCSVファイル選択（複数選択可）">
+          <span id="file-name-main" class="file-pill pill-compare hidden">分析: 未読込</span>
+        </div>
+
+        <!-- 比較データ (任意・複数選択可) -->
+        <div class="upload-group">
+          <label for="file-input-compare" class="file-drop-zone drop-zone-base" id="drop-zone-compare" role="button" tabindex="0" aria-label="比較データCSVをアップロード（任意・複数可）">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-base" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>比較データアップロード</p>
+          </label>
+          <input type="file" id="file-input-compare" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="比較データCSVファイル選択（複数選択可）">
+          <span id="file-name-compare" class="file-pill pill-base hidden">比較: 未読込</span>
+        </div>
+
+        <button type="button" id="btn-export-png" class="btn btn-accent" title="現在のグラフを高解像度PNG画像として保存します" disabled>
+          グラフをPNG保存
+        </button>
+        <button type="button" id="btn-toggle-table" class="btn btn-secondary" aria-expanded="true" aria-controls="table-container">
+          データ一覧を隠す ▲
+        </button>
+
+        <button type="button" id="btn-reset-data" class="header-icon-btn btn-reset-data" title="読み込んだデータをリセットして初期状態に戻します（保存データも消去）" aria-label="データをリセット">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+
+        <button type="button" id="btn-fullscreen" class="header-icon-btn btn-fullscreen-toggle" title="全画面表示に切り替えます" aria-label="全画面表示に切り替え" aria-pressed="false">
+          <span class="fullscreen-icon-container">
+            <svg class="icon-maximize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+            <svg class="icon-minimize" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+            </svg>
+          </span>
+        </button>
+
+        <button type="button" id="btn-theme-toggle" class="header-icon-btn btn-theme-toggle" title="ライトモードに切り替えます" aria-label="ライトモードに切り替え" aria-pressed="false">
+          <span class="theme-icon-container">
+            <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-container">
+
+    <div id="status-message" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+    <!-- 最適化された時間帯別KPIサマリー (6カードグリッド) -->
+    <section class="kpi-grid" aria-label="時間帯実績サマリー">
+      <!-- 1. 売上 -->
+      <article class="kpi-card sales" data-metric="sales">
+        <div class="kpi-title" id="kpi-sales-label">売上実績</div>
+        <div id="kpi-sales" class="kpi-value">-</div>
+        <div id="kpi-sales-sub" class="kpi-subtext">ピーク: -</div>
+        <div id="kpi-sales-badge" class="kpi-badge-slot"></div>
+        <div class="kpi-spark"><canvas id="spark-sales" aria-hidden="true"></canvas></div>
+      </article>
+
+      <!-- 2. 客数 -->
+      <article class="kpi-card count" data-metric="customers">
+        <div class="kpi-title" id="kpi-customers-label">客数実績</div>
+        <div id="kpi-customers" class="kpi-value">-</div>
+        <div id="kpi-customers-sub" class="kpi-subtext">ピーク: -</div>
+        <div id="kpi-customers-badge" class="kpi-badge-slot"></div>
+        <div class="kpi-spark"><canvas id="spark-customers" aria-hidden="true"></canvas></div>
+      </article>
+
+      <!-- 3. 打数(点数) -->
+      <article class="kpi-card items" data-metric="items">
+        <div class="kpi-title" id="kpi-items-label">買上打数 (点数)</div>
+        <div id="kpi-items" class="kpi-value">-</div>
+        <div id="kpi-items-sub" class="kpi-subtext">買上点数: - 点/人</div>
+        <div id="kpi-items-badge" class="kpi-badge-slot"></div>
+        <div class="kpi-spark"><canvas id="spark-items" aria-hidden="true"></canvas></div>
+      </article>
+
+      <!-- 4. 単価 (客単価 / 一品単価) -->
+      <article class="kpi-card price" data-metric="price">
+        <div class="kpi-title">客単価 ／ 一品単価</div>
+        <div id="kpi-avg-spend" class="kpi-value">-</div>
+        <div id="kpi-avg-price-sub" class="kpi-subtext">一品単価: -</div>
+        <div id="kpi-price-badge" class="kpi-badge-slot"></div>
+      </article>
+
+      <!-- 5. 値引率 & 値引金額 -->
+      <article class="kpi-card discount" data-metric="discountRate">
+        <div class="kpi-title">値引率 ／ 値引金額</div>
+        <div id="kpi-discount-rate" class="kpi-value">-</div>
+        <div id="kpi-discount-rate-sub" class="kpi-subtext">値引額: - ／ 最大: -</div>
+        <div id="kpi-discount-rate-badge" class="kpi-badge-slot"></div>
+        <div class="kpi-spark"><canvas id="spark-discount-rate" aria-hidden="true"></canvas></div>
+      </article>
+
+      <!-- 6. 昼・夕夜ピーク構成比 -->
+      <article class="kpi-card peak-split" data-metric="peaks">
+        <div class="kpi-title">昼 ／ 夕夜 売上構成比</div>
+        <div id="kpi-peak-split" class="kpi-value">-</div>
+        <div id="kpi-peak-split-sub" class="kpi-subtext">昼(11-14時) - ／ 夕夜(17-20時) -</div>
+        <div id="kpi-peak-split-badge" class="kpi-badge-slot"></div>
+      </article>
+    </section>
+
+    <!-- メイングラフ -->
+    <section class="chart-card" aria-labelledby="chart-main-title">
+      <div class="chart-card-header">
+        <div class="chart-heading">
+          <h2 id="chart-main-title">時間帯別 売上・客数・打数・値引率</h2>
+          <p id="chart-sub-title" class="chart-subtitle">08:00 〜 23:00 / CSVを読み込むと表示されます</p>
+        </div>
+        <div class="metric-chip-group" role="group" aria-label="グラフ表示項目の切り替え">
+          <button type="button" class="metric-chip chip-sales" data-metric="sales" aria-pressed="true">売上</button>
+          <button type="button" class="metric-chip chip-customers" data-metric="customers" aria-pressed="true">客数</button>
+          <button type="button" class="metric-chip chip-items" data-metric="items" aria-pressed="true">打数</button>
+          <button type="button" class="metric-chip chip-discount-rate" data-metric="discountRate" aria-pressed="true">値引率</button>
+          <button type="button" class="metric-chip chip-discount" data-metric="discount" aria-pressed="false">値引金額</button>
+        </div>
+      </div>
+
+      <div id="compare-legend" class="compare-legend hidden" aria-live="polite">
+        <span class="legend-item"><span class="legend-swatch swatch-solid"></span><span id="legend-main-label">分析データ</span></span>
+        <span class="legend-item"><span class="legend-swatch swatch-dashed"></span><span id="legend-compare-label">比較データ</span></span>
+      </div>
+
+      <div class="chart-wrapper" id="chart-wrapper">
+        <div id="chart-placeholder" class="chart-placeholder">
+          <div class="placeholder-icon" aria-hidden="true">🕒</div>
+          <p class="placeholder-text">時間帯別実績CSVを読み込むとグラフを表示します（複数ファイル対応）</p>
+          <p class="placeholder-subtext">右上の「分析データアップロード」をクリック、またはCSVファイルをドラッグ＆ドロップしてください</p>
+        </div>
+        <canvas id="main-chart-canvas" role="img" aria-label="時間帯別の売上・客数・打数・値引率の複合グラフ" class="hidden"></canvas>
+        <div id="chart-tooltip" class="chart-tooltip" role="tooltip" aria-hidden="true"></div>
+      </div>
+
+      <!-- 時間帯構成比バー -->
+      <div id="share-section" class="share-section hidden" aria-label="時間帯区分別の売上構成比">
+        <div class="share-header-bar">
+          <div class="share-title">売上構成比（時間帯区分）</div>
+          <div class="share-header-controls">
+            <button type="button" id="btn-toggle-band-settings" class="btn btn-secondary btn-sm" aria-expanded="false" aria-controls="band-settings-panel">
+              時間帯区分を設定
+            </button>
+          </div>
+        </div>
+
+        <!-- 時間帯区分カスタマイズパネル (折りたたみ式) -->
+        <div id="band-settings-panel" class="band-settings-panel hidden" aria-label="時間帯区分編集パネル">
+          <div class="band-settings-header">
+            <div class="band-settings-desc">
+              区分ごとの時間帯（開始〜終了）の変更、表示する区分の選択（朝・夜のみ等）、追加・削除が可能です。
+            </div>
+            <div class="band-presets" role="group" aria-label="プリセット">
+              <span class="preset-label">プリセット:</span>
+              <button type="button" class="btn-preset" data-preset="standard">標準5区分</button>
+              <button type="button" class="btn-preset" data-preset="lunch_dinner">昼・夜2区分</button>
+              <button type="button" class="btn-preset" data-preset="morning_night">朝・夜2区分</button>
+              <button type="button" class="btn-preset" data-preset="three_shifts">朝・昼・夜3区分</button>
+              <button type="button" class="btn-preset preset-reset" data-preset="reset">初期化</button>
+            </div>
+          </div>
+          <div id="band-list" class="band-list"></div>
+          <div class="band-settings-footer">
+            <button type="button" id="btn-add-band" class="btn btn-secondary btn-sm">
+              + 区分を追加
+            </button>
+            <button type="button" id="btn-close-band-settings" class="btn btn-accent btn-sm">
+              完了して閉じる
+            </button>
+          </div>
+        </div>
+
+        <div id="share-bar" class="share-bar"></div>
+        <div id="share-legend" class="share-legend"></div>
+      </div>
+    </section>
+
+    <!-- データ一覧テーブル -->
+    <section id="table-container" class="table-card" aria-labelledby="table-main-title">
+      <div class="table-header-bar">
+        <h2 id="table-main-title" class="table-title">時間帯別データ一覧</h2>
+        <p class="table-hint">列見出しクリックで並べ替え ／ 行にカーソルを合わせるとグラフが連動します</p>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table" id="data-table">
+          <thead>
+            <tr id="table-header-row"></tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+          <tfoot id="table-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      データはブラウザ内のIndexedDBに保存され、外部サーバへは一切送信されません。
+    </footer>
+  </main>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="js/format.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
+
