@@ -161,7 +161,7 @@
         position: 'right',
         beginAtZero: true,
         display: 'auto',
-        title: axisTitle('打数 (点)', theme.colors.items),
+        title: axisTitle('打数 (打数)', theme.colors.items),
         ticks: { color: theme.colors.items, font: tickFont, callback: (val) => Fmt.integer(val) },
         grid: { drawOnChartArea: false }
       },
@@ -262,7 +262,7 @@
     fragment.appendChild(el('div', 'tip-section-label', hasCmp ? '時間帯実績（右: 比較比）' : '時間帯実績'));
     fragment.appendChild(tipRow('dot-sales', '売上', Fmt.yen(primarySlot.sales), ratioDiff('sales')));
     fragment.appendChild(tipRow('dot-customers', '客数', Fmt.integer(primarySlot.customers, ' 人'), ratioDiff('customers')));
-    fragment.appendChild(tipRow('dot-items', '打数', Fmt.integer(primarySlot.items, ' 点'), ratioDiff('items')));
+    fragment.appendChild(tipRow('dot-items', '打数', Fmt.integer(primarySlot.items, ' 打数'), ratioDiff('items')));
     fragment.appendChild(tipRow('dot-discount-rate', '値引率', Fmt.percent(primarySlot.discountRate), rateDiff('discountRate')));
     fragment.appendChild(tipRow('dot-discount', '値引金額', Fmt.yen(primarySlot.discount), ratioDiff('discount')));
     fragment.appendChild(tipRow('dot-derived', '客単価', Fmt.yen(primarySlot.avgSpend), ratioDiff('avgSpend')));
@@ -272,7 +272,7 @@
     fragment.appendChild(el('div', 'tip-section-label', '累計（' + firstLabel + ' 〜 ' + primarySlot.label + ' 台）'));
     fragment.appendChild(tipRow('dot-cum', '売上累計', Fmt.yen(primarySlot.cumSales), ratioDiff('cumSales')));
     fragment.appendChild(tipRow('dot-cum', '客数累計', Fmt.integer(primarySlot.cumCustomers, ' 人'), ratioDiff('cumCustomers')));
-    fragment.appendChild(tipRow('dot-cum', '打数累計', Fmt.integer(primarySlot.cumItems, ' 点'), ratioDiff('cumItems')));
+    fragment.appendChild(tipRow('dot-cum', '打数累計', Fmt.integer(primarySlot.cumItems, ' 打数'), ratioDiff('cumItems')));
     fragment.appendChild(tipRow('dot-cum', '値引累計', Fmt.yen(primarySlot.cumDiscount), ratioDiff('cumDiscount')));
     fragment.appendChild(tipRow('dot-cum', '値引累計率', Fmt.percent(primarySlot.cumDiscountRate), rateDiff('cumDiscountRate')));
 

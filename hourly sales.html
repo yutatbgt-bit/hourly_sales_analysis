@@ -141,11 +141,11 @@
         <div class="kpi-spark"><canvas id="spark-customers" aria-hidden="true"></canvas></div>
       </article>
 
-      <!-- 3. 打数(点数) -->
+      <!-- 3. 打数 -->
       <article class="kpi-card items" data-metric="items">
-        <div class="kpi-title" id="kpi-items-label">買上打数 (点数)</div>
+        <div class="kpi-title" id="kpi-items-label">買上打数</div>
         <div id="kpi-items" class="kpi-value">-</div>
-        <div id="kpi-items-sub" class="kpi-subtext">買上点数: - 点/人</div>
+        <div id="kpi-items-sub" class="kpi-subtext">買上打数: - 打数/人</div>
         <div id="kpi-items-badge" class="kpi-badge-slot"></div>
         <div class="kpi-spark"><canvas id="spark-items" aria-hidden="true"></canvas></div>
       </article>
@@ -167,11 +167,11 @@
         <div class="kpi-spark"><canvas id="spark-discount-rate" aria-hidden="true"></canvas></div>
       </article>
 
-      <!-- 6. 昼・夕夜ピーク構成比 -->
+      <!-- 6. 朝・昼・夜 売上構成比 (デフォルト3区分) -->
       <article class="kpi-card peak-split" data-metric="peaks">
-        <div class="kpi-title">昼 ／ 夕夜 売上構成比</div>
+        <div class="kpi-title" id="kpi-peak-split-title">朝 ／ 昼 ／ 夜 売上構成比</div>
         <div id="kpi-peak-split" class="kpi-value">-</div>
-        <div id="kpi-peak-split-sub" class="kpi-subtext">昼(11-14時) - ／ 夕夜(17-20時) -</div>
+        <div id="kpi-peak-split-sub" class="kpi-subtext">朝 - ／ 昼 - ／ 夜 -</div>
         <div id="kpi-peak-split-badge" class="kpi-badge-slot"></div>
       </article>
     </section>
@@ -226,10 +226,10 @@
             </div>
             <div class="band-presets" role="group" aria-label="プリセット">
               <span class="preset-label">プリセット:</span>
-              <button type="button" class="btn-preset" data-preset="standard">標準5区分</button>
+              <button type="button" class="btn-preset" data-preset="standard">朝・昼・夜3区分 (標準)</button>
+              <button type="button" class="btn-preset" data-preset="detail_5">詳細5区分</button>
               <button type="button" class="btn-preset" data-preset="lunch_dinner">昼・夜2区分</button>
               <button type="button" class="btn-preset" data-preset="morning_night">朝・夜2区分</button>
-              <button type="button" class="btn-preset" data-preset="three_shifts">朝・昼・夜3区分</button>
               <button type="button" class="btn-preset preset-reset" data-preset="reset">初期化</button>
             </div>
           </div>

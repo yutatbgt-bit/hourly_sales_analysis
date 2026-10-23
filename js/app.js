@@ -26,18 +26,21 @@
   const STATUS_AUTO_HIDE_MS = 6000;
   const MAX_EXPORT_NAME_LENGTH = 100;
 
-  /** デフォルトの時間帯区分 */
+  /** デフォルトの時間帯区分: 朝・昼・夜 の3区分 */
   const DEFAULT_TIME_BANDS = Object.freeze([
-    { id: 'b_morning',   name: '朝',   from: 8,  to: 10, enabled: true,  color: '#7dd3fc' },
-    { id: 'b_lunch',     name: '昼',   from: 11, to: 13, enabled: true,  color: '#38bdf8' },
-    { id: 'b_afternoon', name: '午後', from: 14, to: 16, enabled: true,  color: '#34d399' },
-    { id: 'b_evening',   name: '夕方', from: 17, to: 19, enabled: true,  color: '#d4af37' },
-    { id: 'b_night',     name: '夜',   from: 20, to: 23, enabled: true,  color: '#a855f7' }
+    { id: 'b_morning', name: '朝', from: 8,  to: 10, enabled: true, color: '#7dd3fc' },
+    { id: 'b_lunch',   name: '昼', from: 11, to: 16, enabled: true, color: '#38bdf8' },
+    { id: 'b_night',   name: '夜', from: 17, to: 23, enabled: true, color: '#a855f7' }
   ]);
 
   /** プリセット定義 */
   const BAND_PRESETS = Object.freeze({
     standard: [
+      { id: 'b_morning', name: '朝', from: 8,  to: 10, enabled: true, color: '#7dd3fc' },
+      { id: 'b_lunch',   name: '昼', from: 11, to: 16, enabled: true, color: '#38bdf8' },
+      { id: 'b_night',   name: '夜', from: 17, to: 23, enabled: true, color: '#a855f7' }
+    ],
+    detail_5: [
       { id: 'b_morning',   name: '朝',   from: 8,  to: 10, enabled: true, color: '#7dd3fc' },
       { id: 'b_lunch',     name: '昼',   from: 11, to: 13, enabled: true, color: '#38bdf8' },
       { id: 'b_afternoon', name: '午後', from: 14, to: 16, enabled: true, color: '#34d399' },
@@ -45,17 +48,17 @@
       { id: 'b_night',     name: '夜',   from: 20, to: 23, enabled: true, color: '#a855f7' }
     ],
     lunch_dinner: [
-      { id: 'b_lunch',     name: '昼 (ランチ)',   from: 11, to: 14, enabled: true, color: '#38bdf8' },
-      { id: 'b_dinner',    name: '夜 (ディナー)', from: 17, to: 21, enabled: true, color: '#a855f7' }
+      { id: 'b_lunch',     name: '昼', from: 11, to: 14, enabled: true, color: '#38bdf8' },
+      { id: 'b_dinner',    name: '夜', from: 17, to: 21, enabled: true, color: '#a855f7' }
     ],
     morning_night: [
-      { id: 'b_morning',   name: '朝',   from: 8,  to: 11, enabled: true, color: '#7dd3fc' },
-      { id: 'b_night',     name: '夜',   from: 18, to: 23, enabled: true, color: '#a855f7' }
+      { id: 'b_morning',   name: '朝', from: 8,  to: 11, enabled: true, color: '#7dd3fc' },
+      { id: 'b_night',     name: '夜', from: 18, to: 23, enabled: true, color: '#a855f7' }
     ],
     three_shifts: [
-      { id: 'b_morning',   name: '朝',     from: 8,  to: 10, enabled: true, color: '#7dd3fc' },
-      { id: 'b_day',       name: '昼・午後', from: 11, to: 16, enabled: true, color: '#38bdf8' },
-      { id: 'b_night',     name: '夕夜',   from: 17, to: 23, enabled: true, color: '#a855f7' }
+      { id: 'b_morning', name: '朝', from: 8,  to: 10, enabled: true, color: '#7dd3fc' },
+      { id: 'b_lunch',   name: '昼', from: 11, to: 16, enabled: true, color: '#38bdf8' },
+      { id: 'b_night',   name: '夜', from: 17, to: 23, enabled: true, color: '#a855f7' }
     ]
   });
 
@@ -674,8 +677,8 @@
 
     // 3. 打数実績
     if (dom['kpi-items-label']) dom['kpi-items-label'].textContent = isAvg ? '平均買上打数' : '買上打数合計';
-    setTextWithPop('kpi-items', Fmt.integer(t.items, ' 点'));
-    setText('kpi-items-sub', '買上点数: ' + Fmt.decimal(t.itemsPerCustomer, ' 点/人'));
+    setTextWithPop('kpi-items', Fmt.integer(t.items, ' 打数'));
+    setText('kpi-items-sub', '買上打数: ' + Fmt.decimal(t.itemsPerCustomer, ' 打数/人'));
 
     // 4. 単価 (客単価 & 一品単価)
     setTextWithPop('kpi-avg-spend', Fmt.yen(t.avgSpend));
@@ -720,45 +723,62 @@
     const total = primary.totals.sales;
     const activeBands = state.timeBands.filter((b) => b.enabled);
 
+    // タイトル更新: 有効な時間帯区分名に動的連動
+    let titleText = '売上構成比';
+    if (activeBands.length > 0 && activeBands.length <= 5) {
+      titleText = activeBands.map((b) => b.name).join(' ／ ') + ' 売上構成比';
+    } else if (activeBands.length > 5) {
+      titleText = '時間帯別 売上構成比 (' + activeBands.length + '区分)';
+    }
+    setText('kpi-peak-split-title', titleText);
+
+    const cardEl = document.querySelector('.kpi-card.peak-split');
+    if (cardEl) {
+      cardEl.dataset.bands = String(activeBands.length);
+    }
+
     if (!Fmt.isNum(total) || total <= 0 || activeBands.length === 0) {
       setText('kpi-peak-split', '-');
-      setText('kpi-peak-split-sub', '有効な時間帯区分がありません');
+      const emptySub = activeBands.length === 0
+        ? '有効な時間帯区分がありません'
+        : activeBands.map((b) => b.name + ' -').join(' ／ ');
+      setText('kpi-peak-split-sub', emptySub);
       renderBadge('kpi-peak-split-badge', null, null);
       return;
     }
 
-    // 主要な最初の2区分（例: 昼と夕夜、または朝と夜）を比較表示
-    const b1 = activeBands[0];
-    const b2 = activeBands.length > 1 ? activeBands[1] : null;
-
-    const b1Sales = primary.slots
-      .filter((s) => s.hasData && s.hour >= b1.from && s.hour <= b1.to)
-      .reduce((acc, s) => acc + (s.sales ?? 0), 0);
-    const b1Share = (b1Sales / total) * 100;
-
-    let textVal = b1.name + ' ' + b1Share.toFixed(1) + '%';
-    let subVal = b1.name + '(' + String(b1.from).padStart(2, '0') + '-' + String(b1.to).padStart(2, '0') + '時) ' + Fmt.yen(b1Sales);
-
-    if (b2) {
-      const b2Sales = primary.slots
-        .filter((s) => s.hasData && s.hour >= b2.from && s.hour <= b2.to)
+    // 各有効区分の売上および構成比を算出
+    const bandStats = activeBands.map((b) => {
+      const sales = primary.slots
+        .filter((s) => s.hasData && s.hour >= b.from && s.hour <= b.to)
         .reduce((acc, s) => acc + (s.sales ?? 0), 0);
-      const b2Share = (b2Sales / total) * 100;
-      textVal = b1.name + ' ' + b1Share.toFixed(1) + '% ／ ' + b2.name + ' ' + b2Share.toFixed(1) + '%';
-      subVal = b1.name + ' ' + Fmt.yen(b1Sales) + ' ／ ' + b2.name + ' ' + Fmt.yen(b2Sales);
-    }
+      const share = total > 0 ? (sales / total) * 100 : 0;
+      return { band: b, sales, share };
+    });
+
+    // 全有効区分の構成比と金額を表示（5区分の場合もすべて表示）
+    const textVal = bandStats.map((st) => st.band.name + ' ' + st.share.toFixed(1) + '%').join(' ／ ');
+    const subVal = bandStats.map((st) => st.band.name + ' ' + Fmt.yen(st.sales)).join(' ／ ');
 
     setTextWithPop('kpi-peak-split', textVal);
     setText('kpi-peak-split-sub', subVal);
 
-    if (compare && compare.totals.sales > 0) {
+    if (compare && compare.totals.sales > 0 && bandStats.length > 0) {
       const cTotal = compare.totals.sales;
-      const cB1Sales = compare.slots
-        .filter((s) => s.hasData && s.hour >= b1.from && s.hour <= b1.to)
+      // 最も売上構成比の高い主力区分で比率差を算出
+      const primaryLead = [...bandStats].sort((a, b) => b.sales - a.sales)[0];
+      const leadBand = primaryLead.band;
+      const cLeadSales = compare.slots
+        .filter((s) => s.hasData && s.hour >= leadBand.from && s.hour <= leadBand.to)
         .reduce((acc, s) => acc + (s.sales ?? 0), 0);
-      const cB1Share = (cB1Sales / cTotal) * 100;
-      const diff = b1Share - cB1Share;
-      renderBadge('kpi-peak-split-badge', diff, b1.name + '比率差 ' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + 'pt', 'up');
+      const cLeadShare = (cLeadSales / cTotal) * 100;
+      const diff = primaryLead.share - cLeadShare;
+      renderBadge(
+        'kpi-peak-split-badge',
+        diff,
+        leadBand.name + '比率差 ' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + 'pt',
+        'up'
+      );
     } else {
       renderBadge('kpi-peak-split-badge', null, null);
     }
@@ -768,10 +788,11 @@
     ['kpi-sales', 'kpi-customers', 'kpi-items', 'kpi-avg-spend', 'kpi-discount-rate', 'kpi-peak-split'].forEach((id) => setText(id, '-'));
     setText('kpi-sales-sub', 'ピーク: -');
     setText('kpi-customers-sub', 'ピーク: -');
-    setText('kpi-items-sub', '買上点数: - 点/人');
+    setText('kpi-items-sub', '買上打数: - 打数/人');
     setText('kpi-avg-price-sub', '一品単価: -');
     setText('kpi-discount-rate-sub', '値引額: - ／ 最大: -');
-    setText('kpi-peak-split-sub', '昼(11-14時) - ／ 夕夜(17-20時) -');
+    setText('kpi-peak-split-title', '朝 ／ 昼 ／ 夜 売上構成比');
+    setText('kpi-peak-split-sub', '朝 - ／ 昼 - ／ 夜 -');
     ['kpi-sales-badge', 'kpi-customers-badge', 'kpi-items-badge', 'kpi-price-badge', 'kpi-discount-rate-badge', 'kpi-peak-split-badge']
       .forEach((id) => renderBadge(id, null, null));
   }

@@ -681,6 +681,38 @@ body {
   margin-top: 6px;
 }
 
+.kpi-card.peak-split .kpi-value {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+.kpi-card.peak-split .kpi-subtext {
+  font-size: 10.5px;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+/* 4区分以上の場合はカード内に美しく収まるよう文字サイズを最適化 */
+.kpi-card.peak-split[data-bands="4"] .kpi-value,
+.kpi-card.peak-split[data-bands="5"] .kpi-value,
+.kpi-card.peak-split[data-bands="6"] .kpi-value {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.kpi-card.peak-split[data-bands="4"] .kpi-subtext,
+.kpi-card.peak-split[data-bands="5"] .kpi-subtext,
+.kpi-card.peak-split[data-bands="6"] .kpi-subtext {
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
 /* ==========================================================================
    Chart Card & Placeholder
    ========================================================================== */
