@@ -130,6 +130,96 @@ body {
 .brand-title {
   display: flex;
   align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.store-profile-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--card-border);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  transition: all 0.2s ease;
+}
+
+.store-profile-bar:hover,
+.store-profile-bar:focus-within {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+.store-profile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  user-select: none;
+  cursor: pointer;
+}
+
+.store-profile-label svg {
+  color: var(--primary);
+}
+
+.store-profile-select {
+  background: transparent;
+  color: var(--text-main);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  outline: none;
+  max-width: 150px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-profile-select:focus-visible {
+  outline: 2px solid var(--primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.store-profile-select option {
+  background-color: var(--card-bg, #1e293b);
+  color: var(--text-main, #f8fafc);
+}
+
+.btn-profile-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.btn-profile-action:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.btn-profile-action.btn-profile-delete:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
 }
 
 .header-title-text h1 {
@@ -2335,3 +2425,109 @@ button.file-pill:hover {
 :root[data-theme="light"] .file-item-badge {
   background: rgba(0, 0, 0, 0.06);
 }
+
+/* ==========================================================================
+   店舗プロファイル追加・名称変更ダイアログ
+   ========================================================================== */
+
+.profile-dialog {
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  color: var(--text-main);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+  width: 90%;
+  max-width: 420px;
+  backdrop-filter: blur(16px);
+}
+
+.profile-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+
+.profile-dialog-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.profile-dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--title-color);
+}
+
+.profile-dialog-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-input-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.profile-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.profile-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.profile-error-message {
+  font-size: 12px;
+  color: #f87171;
+  margin: 2px 0 0 0;
+}
+
+.profile-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--card-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+:root[data-theme="light"] .store-profile-bar {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+:root[data-theme="light"] .store-profile-bar:hover,
+:root[data-theme="light"] .store-profile-bar:focus-within {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root[data-theme="light"] .btn-profile-action {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme="light"] .profile-input {
+  background: rgba(0, 0, 0, 0.03);
+}
+

@@ -29,6 +29,21 @@
         <div class="header-title-text">
           <h1>時間帯別売上分析</h1>
         </div>
+        <div class="store-profile-bar" role="region" aria-label="店舗プロファイル切り替え">
+          <label for="select-store-profile" class="store-profile-label">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span>店舗</span>
+          </label>
+          <select id="select-store-profile" class="store-profile-select" aria-label="分析対象店舗プロファイル選択">
+            <option value="デフォルト">デフォルト</option>
+          </select>
+          <button type="button" id="btn-add-store-profile" class="btn-profile-action" title="新規店舗プロファイルを追加" aria-label="新規店舗プロファイルを追加">＋</button>
+          <button type="button" id="btn-rename-store-profile" class="btn-profile-action" title="現在の店舗プロファイル名を変更" aria-label="現在の店舗プロファイル名を変更">✎</button>
+          <button type="button" id="btn-delete-store-profile" class="btn-profile-action btn-profile-delete" title="現在の店舗プロファイルを削除" aria-label="現在の店舗プロファイルを削除">✕</button>
+        </div>
       </div>
 
       <div class="upload-section">
@@ -376,6 +391,25 @@
         <button type="button" id="btn-file-manager-done" class="btn btn-accent btn-sm">
           完了
         </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 店舗プロファイル追加・名称変更ダイアログ -->
+  <dialog id="profile-dialog" class="profile-dialog" aria-labelledby="profile-dialog-title">
+    <div class="profile-dialog-content">
+      <div class="profile-dialog-header">
+        <h3 id="profile-dialog-title" class="profile-dialog-title">店舗プロファイルの追加</h3>
+        <button type="button" id="btn-close-profile-dialog" class="dialog-close-btn" aria-label="閉じる">×</button>
+      </div>
+      <div class="profile-dialog-body">
+        <label for="input-profile-name" class="profile-input-label">店舗名（最大30文字）</label>
+        <input type="text" id="input-profile-name" class="profile-input" maxlength="30" placeholder="例: 渋谷店、新宿店" autocomplete="off">
+        <p id="profile-error-message" class="profile-error-message hidden" role="alert"></p>
+      </div>
+      <div class="profile-dialog-footer">
+        <button type="button" id="btn-cancel-profile-dialog" class="btn btn-secondary btn-sm">キャンセル</button>
+        <button type="button" id="btn-save-profile-dialog" class="btn btn-accent btn-sm">保存</button>
       </div>
     </div>
   </dialog>

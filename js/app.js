@@ -105,7 +105,9 @@
     sort: { key: 'hour', direction: 'asc' },
     activeRowIndex: null,
     loadSequence: { main: 0, compare: 0 },
-    statusTimerId: null
+    statusTimerId: null,
+    profiles: [HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト'],
+    currentProfile: HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト'
   };
 
   const dom = {};
@@ -132,7 +134,10 @@
       'kpi-avg-spend-compare', 'kpi-discount-rate-compare', 'kpi-peak-split-compare',
       'file-manager-dialog', 'file-manager-title', 'file-manager-subtitle', 'btn-close-file-manager',
       'cb-select-all-files', 'btn-delete-selected-files', 'btn-clear-slot-all', 'file-manager-list',
-      'btn-add-more-files', 'btn-file-manager-done'
+      'btn-add-more-files', 'btn-file-manager-done',
+      'select-store-profile', 'btn-add-store-profile', 'btn-rename-store-profile', 'btn-delete-store-profile',
+      'profile-dialog', 'profile-dialog-title', 'btn-close-profile-dialog', 'input-profile-name',
+      'profile-error-message', 'btn-cancel-profile-dialog', 'btn-save-profile-dialog'
     ];
     ids.forEach((id) => {
       const node = document.getElementById(id);
@@ -149,6 +154,7 @@
     setupPlaceholderDrop();
     preventWindowFileDrop();
     setupFileManagerEvents();
+    setupProfileEvents();
 
     if (dom['btn-mode-sum']) {
       dom['btn-mode-sum'].addEventListener('click', () => setAggMode('sum'));
@@ -176,6 +182,9 @@
     setupBandSettingsEvents();
     renderTableHeader();
     renderEmptyTable();
+
+    // 店舗プロファイル初期化 (ハッシュまたは保存済みリストから)
+    await initProfiles();
 
     // データの永続化復元 (IndexedDB)
     await restorePersistedState();
@@ -371,27 +380,34 @@
       visibility: state.visibility,
       sort: state.sort
     };
-    await HourlyStorage.saveState(dataToSave);
+    await HourlyStorage.saveState(dataToSave, state.currentProfile);
   }
 
-  async function restorePersistedState() {
+  async function restorePersistedState(targetProfile) {
     if (!HourlyStorage) return;
     try {
-      const saved = await HourlyStorage.loadState();
-      if (!saved) return;
+      const profileToLoad = targetProfile || state.currentProfile;
+      const saved = await HourlyStorage.loadState(profileToLoad);
+      if (!saved) {
+        state.rawMainFiles = [];
+        state.rawCompareFiles = [];
+        state.primary = null;
+        state.compare = null;
+        state.aggMode = 'sum';
+        state.activeRowIndex = null;
+        state.timeBands = JSON.parse(JSON.stringify(DEFAULT_TIME_BANDS));
+        updateFilePill('main', null);
+        updateFilePill('compare', null);
+        updateAggModeButtons();
+        recomputeAggregates();
+        updateDashboard();
+        return;
+      }
 
-      if (Array.isArray(saved.rawMainFiles) && saved.rawMainFiles.length > 0) {
-        state.rawMainFiles = saved.rawMainFiles;
-      }
-      if (Array.isArray(saved.rawCompareFiles) && saved.rawCompareFiles.length > 0) {
-        state.rawCompareFiles = saved.rawCompareFiles;
-      }
-      if (saved.aggMode === 'sum' || saved.aggMode === 'avg') {
-        state.aggMode = saved.aggMode;
-      }
-      if (Array.isArray(saved.timeBands) && saved.timeBands.length > 0) {
-        state.timeBands = saved.timeBands;
-      }
+      state.rawMainFiles = (Array.isArray(saved.rawMainFiles) && saved.rawMainFiles.length > 0) ? saved.rawMainFiles : [];
+      state.rawCompareFiles = (Array.isArray(saved.rawCompareFiles) && saved.rawCompareFiles.length > 0) ? saved.rawCompareFiles : [];
+      state.aggMode = (saved.aggMode === 'sum' || saved.aggMode === 'avg') ? saved.aggMode : 'sum';
+      state.timeBands = (Array.isArray(saved.timeBands) && saved.timeBands.length > 0) ? saved.timeBands : JSON.parse(JSON.stringify(DEFAULT_TIME_BANDS));
       if (saved.visibility && typeof saved.visibility === 'object') {
         Object.assign(state.visibility, saved.visibility);
         document.querySelectorAll('.metric-chip').forEach((chip) => {
@@ -409,9 +425,17 @@
       recomputeAggregates();
       if (state.primary) {
         updateFilePill('main', state.primary);
-        if (state.compare) updateFilePill('compare', state.compare);
-        updateDashboard();
-        showStatus('保存されていた前回の分析データを復元しました。', 'info');
+      } else {
+        updateFilePill('main', null);
+      }
+      if (state.compare) {
+        updateFilePill('compare', state.compare);
+      } else {
+        updateFilePill('compare', null);
+      }
+      updateDashboard();
+      if (state.primary) {
+        showStatus('「' + profileToLoad + '」の保存データを復元しました。', 'info');
       }
     } catch (e) {
       console.warn('[HourlySales] failed to restore state:', e);
@@ -916,6 +940,280 @@
     const isMain = activeFileManagerSlot === 'main';
     clearSlot(activeFileManagerSlot);
     closeFileManager();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 店舗プロファイル管理 (複数店舗同時並行分析 & ストレージ分離)
+  // ---------------------------------------------------------------------------
+
+  let profileDialogMode = 'add'; // 'add' | 'rename'
+
+  function getHashProfile() {
+    const hash = global.location.hash || '';
+    const match = hash.match(/(?:^|[#&])store=([^&]+)/);
+    if (match && match[1]) {
+      try {
+        const decoded = decodeURIComponent(match[1]).trim();
+        if (decoded && decoded.length <= 30 && !/[\u0000-\u001F\u007F<>"'&]/.test(decoded)) {
+          return decoded;
+        }
+      } catch (e) {
+        // デコード失敗時は無視
+      }
+    }
+    return null;
+  }
+
+  function setHashProfile(profileName) {
+    if (!profileName) return;
+    const newHash = '#store=' + encodeURIComponent(profileName);
+    if (global.location.hash !== newHash) {
+      global.history.replaceState(null, '', newHash);
+    }
+  }
+
+  async function initProfiles() {
+    if (!HourlyStorage) return;
+    try {
+      const profiles = await HourlyStorage.getProfiles();
+      state.profiles = Array.isArray(profiles) && profiles.length > 0 ? profiles : [HourlyStorage.DEFAULT_PROFILE_NAME];
+
+      const hashStore = getHashProfile();
+      if (hashStore) {
+        if (!state.profiles.includes(hashStore)) {
+          state.profiles.push(hashStore);
+          await HourlyStorage.saveProfiles(state.profiles);
+        }
+        state.currentProfile = hashStore;
+      } else {
+        state.currentProfile = state.profiles[0] || HourlyStorage.DEFAULT_PROFILE_NAME;
+        setHashProfile(state.currentProfile);
+      }
+
+      renderProfileSelect();
+    } catch (e) {
+      console.warn('[HourlySales] failed to init profiles:', e);
+    }
+  }
+
+  function renderProfileSelect() {
+    const select = dom['select-store-profile'];
+    if (!select) return;
+    select.replaceChildren();
+
+    state.profiles.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      if (p === state.currentProfile) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+  }
+
+  function setupProfileEvents() {
+    const select = dom['select-store-profile'];
+    if (select) {
+      select.addEventListener('change', async () => {
+        const nextProfile = select.value;
+        if (nextProfile === state.currentProfile) return;
+        await persistCurrentState();
+        state.currentProfile = nextProfile;
+        setHashProfile(state.currentProfile);
+        await restorePersistedState();
+        renderBandSettingsList();
+        showStatus('店舗プロファイルを「' + state.currentProfile + '」に切り替えました。', 'info');
+      });
+    }
+
+    if (dom['btn-add-store-profile']) {
+      dom['btn-add-store-profile'].addEventListener('click', () => openProfileDialog('add'));
+    }
+    if (dom['btn-rename-store-profile']) {
+      dom['btn-rename-store-profile'].addEventListener('click', () => openProfileDialog('rename'));
+    }
+    if (dom['btn-delete-store-profile']) {
+      dom['btn-delete-store-profile'].addEventListener('click', handleDeleteProfile);
+    }
+
+    if (dom['btn-close-profile-dialog']) {
+      dom['btn-close-profile-dialog'].addEventListener('click', closeProfileDialog);
+    }
+    if (dom['btn-cancel-profile-dialog']) {
+      dom['btn-cancel-profile-dialog'].addEventListener('click', closeProfileDialog);
+    }
+    if (dom['btn-save-profile-dialog']) {
+      dom['btn-save-profile-dialog'].addEventListener('click', handleSaveProfile);
+    }
+
+    const input = dom['input-profile-name'];
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleSaveProfile();
+        } else if (e.key === 'Escape') {
+          closeProfileDialog();
+        }
+      });
+    }
+
+    const dialog = dom['profile-dialog'];
+    if (dialog) {
+      dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) closeProfileDialog();
+      });
+      dialog.addEventListener('cancel', closeProfileDialog);
+    }
+
+    global.addEventListener('hashchange', async () => {
+      const hashStore = getHashProfile();
+      if (hashStore && hashStore !== state.currentProfile) {
+        if (!state.profiles.includes(hashStore)) {
+          state.profiles.push(hashStore);
+          if (HourlyStorage) await HourlyStorage.saveProfiles(state.profiles);
+        }
+        await persistCurrentState();
+        state.currentProfile = hashStore;
+        renderProfileSelect();
+        await restorePersistedState();
+        renderBandSettingsList();
+      }
+    });
+  }
+
+  function openProfileDialog(mode) {
+    profileDialogMode = mode;
+    const dialog = dom['profile-dialog'];
+    const title = dom['profile-dialog-title'];
+    const input = dom['input-profile-name'];
+    const err = dom['profile-error-message'];
+    if (!dialog || !input) return;
+
+    if (err) {
+      err.textContent = '';
+      err.classList.add('hidden');
+    }
+
+    if (mode === 'add') {
+      if (title) title.textContent = '新規店舗プロファイルを追加';
+      input.value = '';
+    } else {
+      if (title) title.textContent = '店舗プロファイル名を変更';
+      input.value = state.currentProfile;
+    }
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+    input.focus();
+  }
+
+  function closeProfileDialog() {
+    const dialog = dom['profile-dialog'];
+    if (!dialog) return;
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  async function handleSaveProfile() {
+    const input = dom['input-profile-name'];
+    if (!input) return;
+
+    const rawName = input.value.trim();
+    if (!rawName) {
+      showProfileError('店舗名を入力してください。');
+      return;
+    }
+    if (rawName.length > 30) {
+      showProfileError('店舗名は30文字以内で入力してください。');
+      return;
+    }
+    if (/[\u0000-\u001F\u007F<>"'&]/.test(rawName)) {
+      showProfileError('店舗名に使用できない文字が含まれています。');
+      return;
+    }
+
+    if (profileDialogMode === 'add') {
+      if (state.profiles.includes(rawName)) {
+        showProfileError('同名の店舗プロファイルが既に存在します。');
+        return;
+      }
+      await persistCurrentState();
+      state.profiles.push(rawName);
+      if (HourlyStorage) await HourlyStorage.saveProfiles(state.profiles);
+      state.currentProfile = rawName;
+      setHashProfile(state.currentProfile);
+      renderProfileSelect();
+      closeProfileDialog();
+      await restorePersistedState();
+      renderBandSettingsList();
+      showStatus('店舗プロファイル「' + rawName + '」を追加しました。', 'success');
+    } else {
+      const oldName = state.currentProfile;
+      if (rawName === oldName) {
+        closeProfileDialog();
+        return;
+      }
+      if (state.profiles.includes(rawName)) {
+        showProfileError('同名の店舗プロファイルが既に存在します。');
+        return;
+      }
+      await persistCurrentState();
+      if (HourlyStorage) {
+        const currentData = await HourlyStorage.loadState(oldName);
+        if (currentData) {
+          await HourlyStorage.saveState(currentData, rawName);
+        }
+        await HourlyStorage.deleteProfile(oldName);
+      }
+      const idx = state.profiles.indexOf(oldName);
+      if (idx !== -1) {
+        state.profiles[idx] = rawName;
+      } else {
+        state.profiles.push(rawName);
+      }
+      if (HourlyStorage) await HourlyStorage.saveProfiles(state.profiles);
+      state.currentProfile = rawName;
+      setHashProfile(state.currentProfile);
+      renderProfileSelect();
+      closeProfileDialog();
+      showStatus('店舗プロファイル名を「' + rawName + '」に変更しました。', 'success');
+    }
+  }
+
+  function showProfileError(msg) {
+    const err = dom['profile-error-message'];
+    if (!err) return;
+    err.textContent = msg;
+    err.classList.remove('hidden');
+  }
+
+  async function handleDeleteProfile() {
+    if (state.profiles.length <= 1) {
+      showStatus('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
+      return;
+    }
+    const targetName = state.currentProfile;
+    const confirmed = global.confirm('店舗プロファイル「' + targetName + '」を削除しますか？\n（この店舗の保存データも消去されます）');
+    if (!confirmed) return;
+
+    if (HourlyStorage) {
+      await HourlyStorage.deleteProfile(targetName);
+    }
+    state.profiles = state.profiles.filter((p) => p !== targetName);
+    state.currentProfile = state.profiles[0] || (HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト');
+    setHashProfile(state.currentProfile);
+    renderProfileSelect();
+    await restorePersistedState();
+    renderBandSettingsList();
+    showStatus('店舗プロファイル「' + targetName + '」を削除しました。', 'info');
   }
 
   // ---------------------------------------------------------------------------
@@ -1675,9 +1973,9 @@
     updateDashboard();
 
     if (HourlyStorage) {
-      await HourlyStorage.clearState();
+      await HourlyStorage.clearState(state.currentProfile);
     }
-    showStatus('読み込んだデータと保存データをすべてリセットしました。', 'info');
+    showStatus('「' + state.currentProfile + '」の読み込みデータと保存データをリセットしました。', 'info');
   }
 
   function showStatus(message, type, autoHideMs) {
