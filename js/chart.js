@@ -23,7 +23,8 @@
 
   const METRIC_ORDER = Object.freeze(['sales', 'discount', 'customers', 'items', 'discountRate']);
   const FONT_NUM = "'Outfit', 'Inter', sans-serif";
-  const TOOLTIP_OFFSET_PX = 16;
+  const TOOLTIP_OFFSET_X = 28;
+  const TOOLTIP_OFFSET_Y = 18;
   const EXPORT_HEADER_PX = 64;
 
   let mainChart = null;
@@ -308,39 +309,169 @@
     renderState.lastTooltipKey = null;
   }
 
-  function externalTooltipHandler(context) {
-    const tip = renderState.tooltipElement;
-    const tooltip = context.tooltip;
-    if (!tip || !renderState.primary) return;
-
-    if (tooltip.opacity === 0 || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
-      hideTooltip();
-      return;
+  /**
+   * 指定座標 (mouseX, mouseY) に存在する棒グラフ要素を厳密に検出する。
+   * 条件:
+   * 1. Y軸の0メモリ(0軸)から下から1メモリ目(第1目盛線)の間のみ反応 (firstTickY <= mouseY <= zeroY)
+   *    ※ 1メモリ目より上の領域(グラフ上部・中腹)では完全に反応を遮断
+   * 2. 分析データまたは比較データの棒グラフの幅内かつバー内であること
+   */
+  function getBarAtCoords(chart, mouseX, mouseY) {
+    if (!chart || !chart.chartArea) return null;
+    const area = chart.chartArea;
+    if (mouseX < area.left || mouseX > area.right || mouseY < area.top || mouseY > area.bottom) {
+      return null;
     }
 
-    const firstPt = tooltip.dataPoints[0];
-    const index = firstPt.dataIndex;
-    const dataset = context.chart.data.datasets[firstPt.datasetIndex];
-    const targetSeries = (dataset && dataset.series === 'compare' && renderState.compare) ? 'compare' : 'main';
+    // Y軸 (ySales) の 0 軸および「下から1メモリ目」の Y 座標を取得
+    const yScale = chart.scales.ySales;
+    if (!yScale) return null;
+
+    const zeroY = yScale.getPixelForValue(0);
+
+    // 0 より大きい最小の目盛り値 (下から1メモリ目) を特定
+    let firstTickValue = null;
+    if (Array.isArray(yScale.ticks)) {
+      for (let i = 0; i < yScale.ticks.length; i++) {
+        const val = yScale.ticks[i].value;
+        if (Fmt.isNum(val) && val > 0) {
+          if (firstTickValue === null || val < firstTickValue) {
+            firstTickValue = val;
+          }
+        }
+      }
+    }
+    const firstTickY = firstTickValue !== null
+      ? yScale.getPixelForValue(firstTickValue)
+      : (area.bottom - (area.bottom - area.top) / 7);
+
+    // Canvas の Y 座標は画面上が小さく画面下が大きいため、
+    // 「0メモリから1メモリ目の間」は firstTickY <= mouseY <= zeroY となる
+    // 1メモリ目より上 (mouseY < firstTickY) は完全に無効化
+    if (mouseY < firstTickY || mouseY > zeroY + 4) {
+      return null;
+    }
+
+    for (let datasetIndex = 0; datasetIndex < chart.data.datasets.length; datasetIndex++) {
+      if (!chart.isDatasetVisible(datasetIndex)) continue;
+      const dataset = chart.data.datasets[datasetIndex];
+      if (dataset.type !== 'bar') continue;
+
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || meta.hidden) continue;
+
+      for (let index = 0; index < meta.data.length; index++) {
+        const bar = meta.data[index];
+        if (bar && typeof bar.inRange === 'function' && bar.inRange(mouseX, mouseY)) {
+          return {
+            datasetIndex,
+            index,
+            series: dataset.series || 'main',
+            element: bar
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * ツールチップの内容構築と位置決めを行う。
+   * カーソルの斜め右上（右端付近では左上）に十分な余白を空けて表示し、操作と視認性を向上させる。
+   * @param {number} index 時間帯スロットインデックス
+   * @param {'main'|'compare'} targetSeries 対象系列
+   * @param {number} cursorX カーソルのCanvas内X座標
+   * @param {number} cursorY カーソルのCanvas内Y座標
+   */
+  function positionAndShowTooltip(index, targetSeries, cursorX, cursorY) {
+    const tip = renderState.tooltipElement;
+    if (!tip || !renderState.primary) return;
 
     const cacheKey = index + '_' + targetSeries;
-    // 指している系列（分析／比較）または時間帯が変わった時だけ再構築
     if (renderState.lastTooltipKey !== cacheKey) {
       tip.replaceChildren(buildTooltipContent(index, targetSeries));
       renderState.lastTooltipKey = cacheKey;
     }
 
     const wrapper = tip.parentElement;
-    const maxX = wrapper.clientWidth - tip.offsetWidth;
-    const maxY = wrapper.clientHeight - tip.offsetHeight;
-    let x = tooltip.caretX + TOOLTIP_OFFSET_PX;
-    if (x > maxX) x = tooltip.caretX - tip.offsetWidth - TOOLTIP_OFFSET_PX;
-    const y = Math.min(Math.max(tooltip.caretY - tip.offsetHeight / 2, 0), Math.max(maxY, 0));
+    if (!wrapper) return;
 
-    tip.style.setProperty('--tip-x', Math.max(0, Math.round(x)) + 'px');
+    const wrapperW = wrapper.clientWidth;
+    const wrapperH = wrapper.clientHeight;
+    const tipW = tip.offsetWidth;
+    const tipH = tip.offsetHeight;
+
+    // 水平方向 (X): カーソルから横に離す (デフォルトは右側)
+    let x = cursorX + TOOLTIP_OFFSET_X;
+    // 右端をはみ出す場合はカーソルより左側へ離して表示
+    if (x + tipW > wrapperW - 12) {
+      x = cursorX - tipW - TOOLTIP_OFFSET_X;
+    }
+    // 左端のはみ出し防止
+    if (x < 8) {
+      x = Math.max(8, Math.min(x, wrapperW - tipW - 8));
+    }
+
+    // 垂直方向 (Y): 合わせたカーソルの「もう少し右上、または左上」
+    // ツールチップの下部がカーソルより上に位置するように配置
+    let y = cursorY - tipH - TOOLTIP_OFFSET_Y;
+
+    // 上端をはみ出す場合（カーソルがグラフ上部にある場合）
+    if (y < 8) {
+      y = 8;
+    }
+    // 下端のはみ出し防止
+    if (y + tipH > wrapperH - 8) {
+      y = Math.max(8, wrapperH - tipH - 8);
+    }
+
+    tip.style.setProperty('--tip-x', Math.round(x) + 'px');
     tip.style.setProperty('--tip-y', Math.round(y) + 'px');
     tip.classList.add('visible');
     tip.setAttribute('aria-hidden', 'false');
+  }
+
+  function handleCanvasMouseMove(event) {
+    if (!mainChart) return;
+    const canvas = mainChart.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    const hit = getBarAtCoords(mainChart, mouseX, mouseY);
+    if (hit) {
+      const isNewIndex = (renderState.highlightIndex !== hit.index);
+      renderState.highlightIndex = hit.index;
+
+      mainChart.setActiveElements([{ datasetIndex: hit.datasetIndex, index: hit.index }]);
+      mainChart.draw();
+
+      positionAndShowTooltip(hit.index, hit.series, mouseX, mouseY);
+
+      if (isNewIndex && renderState.onIndexHover) {
+        renderState.onIndexHover(hit.index);
+      }
+    } else {
+      if (renderState.highlightIndex !== null) {
+        renderState.highlightIndex = null;
+        mainChart.setActiveElements([]);
+        mainChart.draw();
+        hideTooltip();
+        if (renderState.onIndexHover) {
+          renderState.onIndexHover(null);
+        }
+      }
+    }
+  }
+
+  function handleCanvasLeave() {
+    renderState.highlightIndex = null;
+    hideTooltip();
+    if (mainChart) {
+      mainChart.setActiveElements([]);
+      mainChart.draw();
+    }
+    if (renderState.onIndexHover) renderState.onIndexHover(null);
   }
 
   // ---------------------------------------------------------------------------
@@ -384,33 +515,19 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: { duration: 650, easing: 'easeOutQuart' },
-        interaction: { mode: 'nearest', intersect: false },
-        onHover(event, elements) {
-          const index = elements.length ? elements[0].index : null;
-          if (index !== renderState.highlightIndex) {
-            renderState.highlightIndex = index;
-            mainChart.draw();
-            if (renderState.onIndexHover) renderState.onIndexHover(index);
-          }
-        },
+        events: ['resize'], // Chart.js 内蔵ホバーによる折れ線や余白の誤検知を遮断し、canvas イベントで棒グラフ上のみを厳格判定
         plugins: {
-          legend: { display: false }, // 指標チップが凡例を兼ねる
-          tooltip: { enabled: false, external: externalTooltipHandler }
+          legend: { display: false },
+          tooltip: { enabled: false }
         },
         scales: buildScales(theme)
       },
       plugins: [createHighlightPlugin(theme)]
     });
 
+    canvas.addEventListener('mousemove', handleCanvasMouseMove);
     canvas.addEventListener('mouseleave', handleCanvasLeave);
     return mainChart;
-  }
-
-  function handleCanvasLeave() {
-    renderState.highlightIndex = null;
-    hideTooltip();
-    if (mainChart) mainChart.draw();
-    if (renderState.onIndexHover) renderState.onIndexHover(null);
   }
 
   /** 指標の表示切替 (分析・比較の両系列を同時に切り替える) */
@@ -428,23 +545,32 @@
     renderState.highlightIndex = index;
     if (index === null || index === undefined) {
       mainChart.setActiveElements([]);
-      mainChart.tooltip.setActiveElements([], { x: 0, y: 0 });
-      mainChart.update('none');
+      mainChart.draw();
       hideTooltip();
       return;
     }
     const active = [];
+    let barEl = null;
     mainChart.data.datasets.forEach((dataset, datasetIndex) => {
       if (mainChart.isDatasetVisible(datasetIndex) && dataset.data[index] !== null) {
         active.push({ datasetIndex, index });
+        if (!barEl && dataset.type === 'bar') {
+          const meta = mainChart.getDatasetMeta(datasetIndex);
+          if (meta && meta.data && meta.data[index]) {
+            barEl = meta.data[index];
+          }
+        }
       }
     });
-    const area = mainChart.chartArea;
-    const position = { x: mainChart.scales.x.getPixelForValue(index), y: (area.top + area.bottom) / 2 };
+
     mainChart.setActiveElements(active);
-    mainChart.tooltip.setActiveElements(active, position);
-    mainChart.update('none');
-    if (active.length === 0) hideTooltip();
+    mainChart.draw();
+
+    if (active.length > 0 && barEl) {
+      positionAndShowTooltip(index, 'main', barEl.x, barEl.y);
+    } else {
+      hideTooltip();
+    }
   }
 
   /**
@@ -653,6 +779,7 @@
 
   function destroyMainChart() {
     if (mainChart) {
+      mainChart.canvas.removeEventListener('mousemove', handleCanvasMouseMove);
       mainChart.canvas.removeEventListener('mouseleave', handleCanvasLeave);
       mainChart.destroy();
       mainChart = null;
