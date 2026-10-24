@@ -101,7 +101,7 @@
     compare: null,        // 集約済み比較データセット
     tableView: 'primary', // 'primary' | 'compare' (テーブルに表示する対象)
     timeBands: JSON.parse(JSON.stringify(DEFAULT_TIME_BANDS)),
-    visibility: { sales: true, customers: true, items: true, discountRate: true, discount: false },
+    visibility: { sales: true, salesCompare: true, customers: true, items: true, discountRate: true, discount: false },
     sort: { key: 'hour', direction: 'asc' },
     activeRowIndex: null,
     loadSequence: { main: 0, compare: 0 },
@@ -123,6 +123,7 @@
       'drop-zone-main', 'drop-zone-compare', 'btn-mode-sum', 'btn-mode-avg', 'btn-export-png',
       'btn-toggle-table', 'btn-reset-data', 'btn-fullscreen', 'btn-theme-toggle', 'chart-main-title',
       'chart-sub-title', 'chart-wrapper', 'chart-placeholder', 'main-chart-canvas', 'chart-tooltip',
+      'chip-sales-main', 'chip-sales-compare',
       'compare-legend', 'legend-main-label', 'legend-compare-label', 'share-section', 'share-bar',
       'share-bar-compare-container', 'share-bar-compare', 'share-meta-main', 'share-meta-compare',
       'share-legend', 'btn-toggle-band-settings', 'band-settings-panel', 'band-list', 'btn-add-band',
@@ -412,8 +413,10 @@
         Object.assign(state.visibility, saved.visibility);
         document.querySelectorAll('.metric-chip').forEach((chip) => {
           const k = chip.dataset.metric;
-          if (k in state.visibility) {
-            chip.setAttribute('aria-pressed', String(state.visibility[k]));
+          const series = chip.dataset.series;
+          const visibilityKey = (k === 'sales' && series === 'compare') ? 'salesCompare' : k;
+          if (visibilityKey in state.visibility) {
+            chip.setAttribute('aria-pressed', String(state.visibility[visibilityKey]));
           }
         });
       }
@@ -1231,6 +1234,13 @@
     dom['compare-legend'].classList.toggle('hidden', !compare);
     dom['btn-export-png'].disabled = !hasData;
 
+    if (dom['chip-sales-compare']) {
+      dom['chip-sales-compare'].classList.toggle('hidden', !compare);
+    }
+    if (dom['chip-sales-main']) {
+      dom['chip-sales-main'].textContent = compare ? '売上（分析）' : '売上';
+    }
+
     if (dom['table-view-toggle']) {
       dom['table-view-toggle'].classList.toggle('hidden', !compare);
     }
@@ -1916,10 +1926,12 @@
 
   function toggleMetric(chip) {
     const key = chip.dataset.metric;
-    if (!Object.prototype.hasOwnProperty.call(state.visibility, key)) return;
-    state.visibility[key] = !state.visibility[key];
-    chip.setAttribute('aria-pressed', String(state.visibility[key]));
-    HourlyChart.setMetricVisibility(key, state.visibility[key]);
+    const series = chip.dataset.series;
+    const visibilityKey = (key === 'sales' && series === 'compare') ? 'salesCompare' : key;
+    if (!Object.prototype.hasOwnProperty.call(state.visibility, visibilityKey)) return;
+    state.visibility[visibilityKey] = !state.visibility[visibilityKey];
+    chip.setAttribute('aria-pressed', String(state.visibility[visibilityKey]));
+    HourlyChart.setMetricVisibility(key, state.visibility[visibilityKey], series);
     persistCurrentState();
   }
 

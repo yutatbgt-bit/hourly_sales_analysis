@@ -1339,6 +1339,14 @@ button.file-pill:hover {
 }
 
 .chip-sales         { --chip-color: var(--accent-blue); }
+.chip-sales-compare {
+  --chip-color: var(--accent-blue);
+  border-style: dashed;
+}
+.chip-sales-compare::before {
+  border: 1.5px dashed var(--chip-color);
+  background: transparent !important;
+}
 .chip-customers     { --chip-color: var(--accent-green); }
 .chip-items         { --chip-color: var(--accent-purple); }
 .chip-discount-rate { --chip-color: var(--accent-rose); }

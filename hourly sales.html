@@ -240,7 +240,8 @@
           <p id="chart-sub-title" class="chart-subtitle">08:00 〜 23:00 / CSVを読み込むと表示されます</p>
         </div>
         <div class="metric-chip-group" role="group" aria-label="グラフ表示項目の切り替え">
-          <button type="button" class="metric-chip chip-sales" data-metric="sales" aria-pressed="true">売上</button>
+          <button type="button" class="metric-chip chip-sales" data-metric="sales" data-series="main" id="chip-sales-main" aria-pressed="true">売上</button>
+          <button type="button" class="metric-chip chip-sales chip-sales-compare hidden" data-metric="sales" data-series="compare" id="chip-sales-compare" aria-pressed="true">売上（比較）</button>
           <button type="button" class="metric-chip chip-customers" data-metric="customers" aria-pressed="true">客数</button>
           <button type="button" class="metric-chip chip-items" data-metric="items" aria-pressed="true">打数</button>
           <button type="button" class="metric-chip chip-discount-rate" data-metric="discountRate" aria-pressed="true">値引率</button>

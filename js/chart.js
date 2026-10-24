@@ -30,14 +30,21 @@
   let mainChart = null;
   const sparkCharts = new Map();
 
-  /** ツールチップ・ハイライト用に描画中のデータを保持 */
+  /** ツールチップ・ハイライト・スケール固定用に描画中のデータを保持 */
   const renderState = {
     primary: null,
     compare: null,
     tooltipElement: null,
     lastTooltipKey: null,
     highlightIndex: null,
-    onIndexHover: null
+    onIndexHover: null,
+    scaleLimits: {
+      sales: null,
+      discount: null,
+      customers: null,
+      items: null,
+      discountRate: null
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -82,22 +89,36 @@
     const values = dataSet.slots.map((slot) => (slot.hasData ? slot[metricKey] : null));
     const seriesSuffix = hasCompare ? (isCompare ? '（比較）' : '（分析）') : '';
 
+    const isBarWithCompare = (def.type === 'bar' && hasCompare);
     const common = {
       label: def.label + seriesSuffix,
       data: values,
       yAxisID: def.axis,
-      hidden: !visible,
+      // 比較データが存在する場合、棒グラフは2本並びの幅・位置を固定するため hidden は常に false とし、色で表示切替を行う
+      hidden: isBarWithCompare ? false : !visible,
       metricKey,
       series,
-      pointStyle: def.pointStyle
+      pointStyle: def.pointStyle,
+      _customHidden: !visible
     };
 
     if (def.type === 'bar') {
+      const bg = withAlpha(color, isCompare ? 0.18 : (metricKey === 'sales' ? 0.62 : 0.55));
+      const hoverBg = withAlpha(color, isCompare ? 0.32 : 0.85);
+      const border = withAlpha(color, isCompare ? 0.6 : 1);
+
+      common._origColors = {
+        backgroundColor: bg,
+        hoverBackgroundColor: hoverBg,
+        borderColor: border
+      };
+
+      const isActuallyVisible = isBarWithCompare ? visible : true;
       return Object.assign(common, {
         type: 'bar',
-        backgroundColor: withAlpha(color, isCompare ? 0.18 : (metricKey === 'sales' ? 0.62 : 0.55)),
-        hoverBackgroundColor: withAlpha(color, isCompare ? 0.32 : 0.85),
-        borderColor: withAlpha(color, isCompare ? 0.6 : 1),
+        backgroundColor: isActuallyVisible ? bg : 'transparent',
+        hoverBackgroundColor: isActuallyVisible ? hoverBg : 'transparent',
+        borderColor: isActuallyVisible ? border : 'transparent',
         borderWidth: isCompare ? { top: 1.5, left: 1, right: 1, bottom: 0 } : 1.5,
         borderDash: isCompare ? [4, 3] : [],
         borderRadius: { topLeft: 5, topRight: 5 },
@@ -126,57 +147,181 @@
     });
   }
 
-  function buildScales(theme) {
+  /**
+   * 棒グラフや折れ線の上に無駄な空白を作らないよう、
+   * 最大値よりわずか数パーセント（約2%〜5%）だけ上回る最小のキリの良い上限値を計算する。
+   * @param {number} rawMax 実データの最大値
+   * @param {number} minUnit 最小単位（売上は1000、客数・打数は1、値引率は0.5）
+   * @returns {number|undefined}
+   */
+  function computeTightMax(rawMax, minUnit) {
+    if (!Fmt.isNum(rawMax) || rawMax <= 0) return undefined;
+    const unit = minUnit || 1;
+    if (rawMax <= unit) return unit;
+
+    // 余白をわずか約2.5%に抑える目標値
+    const target = rawMax * 1.025;
+    const exp = Math.floor(Math.log10(target));
+    // 桁に応じた刻み幅候補（1, 2, 2.5, 5 × 10^(exp-1)）
+    const base = Math.max(unit, Math.pow(10, Math.max(0, exp - 1)));
+    const candidateSteps = [
+      base,
+      base * 2,
+      base * 2.5,
+      base * 5,
+      base * 10
+    ].filter((s) => s >= unit);
+
+    let bestMax = Math.ceil(target / base) * base;
+    for (let i = 0; i < candidateSteps.length; i++) {
+      const step = candidateSteps[i];
+      const candidate = Math.ceil(target / step) * step;
+      if (candidate >= rawMax * 1.015 && candidate < bestMax) {
+        bestMax = candidate;
+      }
+    }
+
+    if (bestMax <= rawMax) {
+      bestMax += unit;
+    }
+    return bestMax;
+  }
+
+  function resolveCurrentScaleLimit(chart) {
+    if (!chart || !chart.data) return renderState.scaleLimits.sales || undefined;
+
+    let isSalesActive = false;
+    let isDiscountActive = false;
+    chart.data.datasets.forEach((ds, idx) => {
+      if (!isDatasetActive(chart, idx)) return;
+      if (ds.metricKey === 'sales') isSalesActive = true;
+      if (ds.metricKey === 'discount') isDiscountActive = true;
+    });
+
+    // 売上（分析・比較のいずれか）が表示中なら、両方表示時の最適な売上メモリ幅で固定
+    if (isSalesActive) {
+      return renderState.scaleLimits.sales || undefined;
+    }
+    // 売上が非表示で、値引金額が表示中なら、値引金額に合わせた最適幅に随時調整
+    if (isDiscountActive) {
+      return renderState.scaleLimits.discount || undefined;
+    }
+    return renderState.scaleLimits.sales || undefined;
+  }
+
+  function syncScaleTitleAndMax(chart) {
+    if (!chart || !chart.options || !chart.options.scales || !chart.options.scales.ySales) return;
+    const targetMax = resolveCurrentScaleLimit(chart);
+    const yScale = chart.options.scales.ySales;
+    yScale.max = targetMax;
+
+    let isSalesActive = false;
+    let isDiscountActive = false;
+    chart.data.datasets.forEach((ds, idx) => {
+      if (!isDatasetActive(chart, idx)) return;
+      if (ds.metricKey === 'sales') isSalesActive = true;
+      if (ds.metricKey === 'discount') isDiscountActive = true;
+    });
+
+    const isYenUnit = (!isSalesActive && isDiscountActive);
+    const theme = readTheme();
+    const axisColor = isYenUnit ? theme.colors.discount : theme.colors.sales;
+
+    if (yScale.title) {
+      yScale.title.text = isYenUnit ? '値引金額 (円)' : '売上 / 値引 (千円)';
+      yScale.title.color = axisColor;
+    }
+
+    if (yScale.ticks) {
+      yScale.ticks.color = axisColor;
+      yScale.ticks.callback = (val) => {
+        if (!Fmt.isNum(val)) return '';
+        return isYenUnit
+          ? Number(Math.round(val)).toLocaleString()
+          : Number(Math.round(val / 1000)).toLocaleString();
+      };
+    }
+  }
+
+  function buildScales(theme, targetSalesMax, isYenUnit) {
     const tickFont = { family: FONT_NUM, size: 11 };
     const axisTitle = (text, color) => ({ display: true, text, color, font: { size: 12, weight: '600' } });
+    const axisColor = isYenUnit ? theme.colors.discount : theme.colors.sales;
+
+    const ySalesConfig = {
+      type: 'linear',
+      position: 'left',
+      beginAtZero: true,
+      display: 'auto',
+      title: axisTitle(isYenUnit ? '値引金額 (円)' : '売上 / 値引 (千円)', axisColor),
+      ticks: {
+        color: axisColor,
+        font: tickFont,
+        callback: (val) => {
+          if (!Fmt.isNum(val)) return '';
+          return isYenUnit
+            ? Number(Math.round(val)).toLocaleString()
+            : Number(Math.round(val / 1000)).toLocaleString();
+        }
+      },
+      grid: { color: theme.grid }
+    };
+    if (targetSalesMax !== undefined && targetSalesMax !== null) {
+      ySalesConfig.max = targetSalesMax;
+    }
+
+    const yCustomersConfig = {
+      type: 'linear',
+      position: 'right',
+      beginAtZero: true,
+      display: 'auto',
+      title: axisTitle('客数 (人)', theme.colors.customers),
+      ticks: { color: theme.colors.customers, font: tickFont, callback: (val) => Fmt.integer(val) },
+      grid: { drawOnChartArea: false }
+    };
+    if (renderState.scaleLimits.customers) {
+      yCustomersConfig.max = renderState.scaleLimits.customers;
+    }
+
+    const yItemsConfig = {
+      type: 'linear',
+      position: 'right',
+      beginAtZero: true,
+      display: 'auto',
+      title: axisTitle('打数 (打数)', theme.colors.items),
+      ticks: { color: theme.colors.items, font: tickFont, callback: (val) => Fmt.integer(val) },
+      grid: { drawOnChartArea: false }
+    };
+    if (renderState.scaleLimits.items) {
+      yItemsConfig.max = renderState.scaleLimits.items;
+    }
+
+    const yRateConfig = {
+      type: 'linear',
+      position: 'right',
+      beginAtZero: true,
+      display: 'auto',
+      title: axisTitle('値引率 (%)', theme.colors.discountRate),
+      ticks: { color: theme.colors.discountRate, font: tickFont, callback: (val) => Number(val).toFixed(1) + '%' },
+      grid: { drawOnChartArea: false }
+    };
+    if (renderState.scaleLimits.discountRate) {
+      yRateConfig.max = renderState.scaleLimits.discountRate;
+    }
+
     return {
       x: {
         grid: { display: false },
         ticks: { color: theme.textMuted, font: { family: FONT_NUM, size: 12, weight: '600' } },
         title: axisTitle('時間帯', theme.textMuted)
       },
-      ySales: {
-        type: 'linear',
-        position: 'left',
-        beginAtZero: true,
-        display: 'auto',
-        title: axisTitle('売上 / 値引 (千円)', theme.colors.sales),
-        ticks: {
-          color: theme.colors.sales,
-          font: tickFont,
-          callback: (val) => (Fmt.isNum(val) ? Number(Math.round(val / 1000)).toLocaleString() : '')
-        },
-        grid: { color: theme.grid }
-      },
-      yCustomers: {
-        type: 'linear',
-        position: 'right',
-        beginAtZero: true,
-        display: 'auto',
-        title: axisTitle('客数 (人)', theme.colors.customers),
-        ticks: { color: theme.colors.customers, font: tickFont, callback: (val) => Fmt.integer(val) },
-        grid: { drawOnChartArea: false }
-      },
-      yItems: {
-        type: 'linear',
-        position: 'right',
-        beginAtZero: true,
-        display: 'auto',
-        title: axisTitle('打数 (打数)', theme.colors.items),
-        ticks: { color: theme.colors.items, font: tickFont, callback: (val) => Fmt.integer(val) },
-        grid: { drawOnChartArea: false }
-      },
-      yRate: {
-        type: 'linear',
-        position: 'right',
-        beginAtZero: true,
-        display: 'auto',
-        title: axisTitle('値引率 (%)', theme.colors.discountRate),
-        ticks: { color: theme.colors.discountRate, font: tickFont, callback: (val) => Number(val).toFixed(1) + '%' },
-        grid: { drawOnChartArea: false }
-      }
+      ySales: ySalesConfig,
+      yCustomers: yCustomersConfig,
+      yItems: yItemsConfig,
+      yRate: yRateConfig
     };
   }
+
 
   /** ホバー中 / 表と連動中の時間帯を縦帯でハイライトするプラグイン */
   function createHighlightPlugin(theme) {
@@ -309,6 +454,14 @@
     renderState.lastTooltipKey = null;
   }
 
+  /** データセットが有効かつ表示状態か判定する (透明化された棒グラフも非アクティブと判定) */
+  function isDatasetActive(chart, datasetIndex) {
+    if (!chart || !chart.data || !chart.data.datasets[datasetIndex]) return false;
+    const dataset = chart.data.datasets[datasetIndex];
+    if (dataset._customHidden) return false;
+    return chart.isDatasetVisible(datasetIndex);
+  }
+
   /**
    * 指定座標 (mouseX, mouseY) に存在する棒グラフ要素を厳密に検出する。
    * 条件:
@@ -353,7 +506,7 @@
     }
 
     for (let datasetIndex = 0; datasetIndex < chart.data.datasets.length; datasetIndex++) {
-      if (!chart.isDatasetVisible(datasetIndex)) continue;
+      if (!isDatasetActive(chart, datasetIndex)) continue;
       const dataset = chart.data.datasets[datasetIndex];
       if (dataset.type !== 'bar') continue;
 
@@ -499,14 +652,57 @@
     renderState.highlightIndex = null;
     hideTooltip();
 
+    // 全指標の最大値を走査し、各軸で上部余白を極小(2〜5%)に抑えるタイトな最大値を算出
+    let maxSales = 0;
+    let maxDiscount = 0;
+    let maxCustomers = 0;
+    let maxItems = 0;
+    let maxDiscountRate = 0;
+
+    const scanDatasetMax = (ds) => {
+      if (!ds || !Array.isArray(ds.slots)) return;
+      for (let i = 0; i < ds.slots.length; i++) {
+        const slot = ds.slots[i];
+        if (slot && slot.hasData) {
+          if (Fmt.isNum(slot.sales) && slot.sales > maxSales) maxSales = slot.sales;
+          if (Fmt.isNum(slot.discount) && slot.discount > maxDiscount) maxDiscount = slot.discount;
+          if (Fmt.isNum(slot.customers) && slot.customers > maxCustomers) maxCustomers = slot.customers;
+          if (Fmt.isNum(slot.items) && slot.items > maxItems) maxItems = slot.items;
+          if (Fmt.isNum(slot.discountRate) && slot.discountRate > maxDiscountRate) maxDiscountRate = slot.discountRate;
+        }
+      }
+    };
+    scanDatasetMax(primary);
+    scanDatasetMax(compare);
+
+    renderState.scaleLimits = {
+      sales: computeTightMax(maxSales, 1000),
+      discount: computeTightMax(maxDiscount, 10),
+      customers: computeTightMax(maxCustomers, 1),
+      items: computeTightMax(maxItems, 1),
+      discountRate: computeTightMax(maxDiscountRate, 0.5)
+    };
+
     const hasCompare = Boolean(compare);
     const datasets = [];
     METRIC_ORDER.forEach((key) => {
       if (key === 'discount' && !primary.hasDiscountColumn) return;
-      const visible = Boolean(visibility[key]);
-      datasets.push(buildDataset(key, primary, 'main', theme, visible, hasCompare));
-      if (hasCompare) datasets.push(buildDataset(key, compare, 'compare', theme, visible, hasCompare));
+      const isSales = (key === 'sales');
+      const mainVisible = isSales
+        ? (visibility.sales !== false && visibility.salesMain !== false)
+        : Boolean(visibility[key]);
+      const compareVisible = isSales
+        ? (visibility.salesCompare !== false)
+        : Boolean(visibility[key]);
+
+      datasets.push(buildDataset(key, primary, 'main', theme, mainVisible, hasCompare));
+      if (hasCompare) datasets.push(buildDataset(key, compare, 'compare', theme, compareVisible, hasCompare));
     });
+
+    const initialSalesActive = (visibility.sales !== false && visibility.salesMain !== false) || (hasCompare && visibility.salesCompare !== false);
+    const initialDiscountActive = Boolean(visibility.discount);
+    const isYenUnit = (!initialSalesActive && initialDiscountActive);
+    const initialTargetMax = initialSalesActive ? renderState.scaleLimits.sales : (initialDiscountActive ? renderState.scaleLimits.discount : renderState.scaleLimits.sales);
 
     mainChart = new global.Chart(canvas, {
       type: 'bar',
@@ -514,13 +710,14 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { top: 6, bottom: 0, left: 0, right: 0 } },
         animation: { duration: 650, easing: 'easeOutQuart' },
         events: ['resize'], // Chart.js 内蔵ホバーによる折れ線や余白の誤検知を遮断し、canvas イベントで棒グラフ上のみを厳格判定
         plugins: {
           legend: { display: false },
           tooltip: { enabled: false }
         },
-        scales: buildScales(theme)
+        scales: buildScales(theme, initialTargetMax, isYenUnit)
       },
       plugins: [createHighlightPlugin(theme)]
     });
@@ -530,12 +727,30 @@
     return mainChart;
   }
 
-  /** 指標の表示切替 (分析・比較の両系列を同時に切り替える) */
-  function setMetricVisibility(metricKey, visible) {
+  /** 指標の表示切替 (series 指定時はその系列のみ、省略時は全系列を切り替える) */
+  function setMetricVisibility(metricKey, visible, series) {
     if (!mainChart) return;
     mainChart.data.datasets.forEach((dataset, i) => {
-      if (dataset.metricKey === metricKey) mainChart.setDatasetVisibility(i, visible);
+      if (dataset.metricKey === metricKey) {
+        if (!series || dataset.series === series) {
+          dataset._customHidden = !visible;
+          if (dataset.type === 'bar' && renderState.compare) {
+            // 比較データが存在する場合、棒グラフの幅・位置を2本並びの状態で固定するため透明度で切り替える
+            dataset.hidden = false;
+            if (dataset._origColors) {
+              dataset.backgroundColor = visible ? dataset._origColors.backgroundColor : 'transparent';
+              dataset.hoverBackgroundColor = visible ? dataset._origColors.hoverBackgroundColor : 'transparent';
+              dataset.borderColor = visible ? dataset._origColors.borderColor : 'transparent';
+            }
+          } else {
+            mainChart.setDatasetVisibility(i, visible);
+          }
+        }
+      }
     });
+
+    // 表示状態に応じて売上メモリ幅（または値引金額幅）を動的に同期
+    syncScaleTitleAndMax(mainChart);
     mainChart.update();
   }
 
@@ -552,7 +767,7 @@
     const active = [];
     let barEl = null;
     mainChart.data.datasets.forEach((dataset, datasetIndex) => {
-      if (mainChart.isDatasetVisible(datasetIndex) && dataset.data[index] !== null) {
+      if (isDatasetActive(mainChart, datasetIndex) && dataset.data[index] !== null) {
         active.push({ datasetIndex, index });
         if (!barEl && dataset.type === 'bar') {
           const meta = mainChart.getDatasetMeta(datasetIndex);
