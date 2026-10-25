@@ -407,11 +407,11 @@
     }
 
     const hasBase = Boolean(baselineSlot && baselineSlot.hasData);
-    const ratioDiff = (key) => {
+    const ratioDiff = (key, goodDirection = 'up') => {
       if (!hasBase) return null;
       const r = Fmt.ratio(activeSlot[key], baselineSlot[key]);
       const prefix = isCompare ? '分析比 ' : '比較比 ';
-      return diffNode(prefix + Fmt.ratioText(r), Fmt.isNum(r) ? r - 100 : null, 'up');
+      return diffNode(prefix + Fmt.ratioText(r), Fmt.isNum(r) ? r - 100 : null, goodDirection);
     };
     const rateDiff = (key) => {
       if (!hasBase) return null;
@@ -428,7 +428,7 @@
     fragment.appendChild(tipRow('dot-customers', '客数', Fmt.integer(activeSlot.customers, ' 人'), ratioDiff('customers')));
     fragment.appendChild(tipRow('dot-items', '打数', Fmt.integer(activeSlot.items, ' 打数'), ratioDiff('items')));
     fragment.appendChild(tipRow('dot-discount-rate', '値引率', Fmt.percent(activeSlot.discountRate), rateDiff('discountRate')));
-    fragment.appendChild(tipRow('dot-discount', '値引金額', Fmt.yen(activeSlot.discount), ratioDiff('discount')));
+    fragment.appendChild(tipRow('dot-discount', '値引金額', Fmt.yen(activeSlot.discount), ratioDiff('discount', 'down')));
     fragment.appendChild(tipRow('dot-derived', '客単価', Fmt.yen(activeSlot.avgSpend), ratioDiff('avgSpend')));
     fragment.appendChild(tipRow('dot-derived', '一品単価', Fmt.yen(activeSlot.avgItemPrice), ratioDiff('avgItemPrice')));
 
@@ -437,7 +437,7 @@
     fragment.appendChild(tipRow('dot-cum', '売上累計', Fmt.yen(activeSlot.cumSales), ratioDiff('cumSales')));
     fragment.appendChild(tipRow('dot-cum', '客数累計', Fmt.integer(activeSlot.cumCustomers, ' 人'), ratioDiff('cumCustomers')));
     fragment.appendChild(tipRow('dot-cum', '打数累計', Fmt.integer(activeSlot.cumItems, ' 打数'), ratioDiff('cumItems')));
-    fragment.appendChild(tipRow('dot-cum', '値引累計', Fmt.yen(activeSlot.cumDiscount), ratioDiff('cumDiscount')));
+    fragment.appendChild(tipRow('dot-cum', '値引累計', Fmt.yen(activeSlot.cumDiscount), ratioDiff('cumDiscount', 'down')));
     fragment.appendChild(tipRow('dot-cum', '値引累計率', Fmt.percent(activeSlot.cumDiscountRate), rateDiff('cumDiscountRate')));
 
     if (baselineDS && !hasBase) {
