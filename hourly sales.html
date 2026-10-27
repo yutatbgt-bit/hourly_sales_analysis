@@ -59,15 +59,15 @@
 
         <!-- 分析データ (メイン・複数選択可) -->
         <div class="upload-group">
-          <label for="file-input-main" class="file-drop-zone drop-zone-compare" id="drop-zone-main" role="button" tabindex="0" aria-label="分析データCSVをアップロード（複数可）">
+          <label for="file-input-main" class="file-drop-zone drop-zone-compare" id="drop-zone-main" role="button" tabindex="0" aria-label="分析データ（CSV/Excel）をアップロード（複数可）" title="CSVまたはExcelファイル（.xlsx, .xls等）をドロップまたはクリックして選択">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-compare" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            <p>分析データアップロード</p>
+            <p>分析データ (CSV/Excel)</p>
           </label>
-          <input type="file" id="file-input-main" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="分析データCSVファイル選択（複数選択可）">
+          <input type="file" id="file-input-main" class="visually-hidden-input" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple aria-label="分析データファイル選択（CSVまたはExcel、複数選択可）">
           <div class="file-pill-group" id="file-pill-group-main">
             <button type="button" id="file-name-main" class="file-pill pill-compare hidden" title="クリックしてファイル一覧・個別削除を開く">分析: 未読込</button>
           </div>
@@ -75,15 +75,15 @@
 
         <!-- 比較データ (任意・複数選択可) -->
         <div class="upload-group">
-          <label for="file-input-compare" class="file-drop-zone drop-zone-base" id="drop-zone-compare" role="button" tabindex="0" aria-label="比較データCSVをアップロード（任意・複数可）">
+          <label for="file-input-compare" class="file-drop-zone drop-zone-base" id="drop-zone-compare" role="button" tabindex="0" aria-label="比較データ（CSV/Excel）をアップロード（任意・複数可）" title="CSVまたはExcelファイル（.xlsx, .xls等）をドロップまたはクリックして選択">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-base" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            <p>比較データアップロード</p>
+            <p>比較データ (CSV/Excel)</p>
           </label>
-          <input type="file" id="file-input-compare" class="visually-hidden-input" accept=".csv,text/csv" multiple aria-label="比較データCSVファイル選択（複数選択可）">
+          <input type="file" id="file-input-compare" class="visually-hidden-input" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple aria-label="比較データファイル選択（CSVまたはExcel、複数選択可）">
           <div class="file-pill-group" id="file-pill-group-compare">
             <button type="button" id="file-name-compare" class="file-pill pill-base hidden" title="クリックしてファイル一覧・個別削除を開く">比較: 未読込</button>
           </div>
@@ -386,7 +386,7 @@
       <div id="file-manager-list" class="file-manager-list" role="list"></div>
 
       <div class="file-manager-footer">
-        <button type="button" id="btn-add-more-files" class="btn btn-secondary btn-sm" title="このスロットにさらにCSVファイルを追加">
+        <button type="button" id="btn-add-more-files" class="btn btn-secondary btn-sm" title="このスロットにさらにCSV/Excelファイルを追加">
           ＋ ファイルを追加
         </button>
         <button type="button" id="btn-file-manager-done" class="btn btn-accent btn-sm">
@@ -416,6 +416,7 @@
   </dialog>
 
   <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/xlsx.full.min.js"></script>
   <script src="js/format.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/parser.js"></script>

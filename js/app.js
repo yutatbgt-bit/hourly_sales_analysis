@@ -548,13 +548,13 @@
    * @param {'main'|'compare'} slot
    */
   async function handleFiles(files, slot) {
-    const csvFiles = files.filter((f) => /\.csv$/i.test(f.name));
-    if (csvFiles.length === 0) {
-      showStatus('CSVファイル (.csv) を指定してください。', 'error');
+    const validFiles = files.filter((f) => /\.(csv|xlsx|xls|xlsm|xlsb)$/i.test(f.name));
+    if (validFiles.length === 0) {
+      showStatus('CSVまたはExcelファイル（.xlsx, .xls等）を指定してください。', 'error');
       return;
     }
 
-    const totalCount = csvFiles.length;
+    const totalCount = validFiles.length;
     const sequence = ++state.loadSequence[slot];
     const isLargeBatch = totalCount >= 8;
 
@@ -567,7 +567,7 @@
     for (let i = 0; i < totalCount; i++) {
       if (sequence !== state.loadSequence[slot]) return;
 
-      const file = csvFiles[i];
+      const file = validFiles[i];
 
       // 大量ファイル処理時は進捗を更新し、メインスレッドを開放してUIの固まりとメモリ蓄積を防止
       if (isLargeBatch && (i % BATCH_YIELD_INTERVAL === 0 || i === totalCount - 1)) {
@@ -1256,7 +1256,7 @@
       resetKpis();
       renderTableHeader();
       renderEmptyTable();
-      dom['chart-sub-title'].textContent = '08:00 〜 23:00 / CSVを読み込むと表示されます';
+      dom['chart-sub-title'].textContent = '08:00 〜 23:00 / CSVまたはExcelを読み込むと表示されます';
       return;
     }
 
@@ -1285,7 +1285,7 @@
     const chip = document.querySelector('.metric-chip[data-metric="discount"]');
     if (!chip) return;
     chip.disabled = !primary.hasDiscountColumn;
-    chip.title = primary.hasDiscountColumn ? '' : 'このCSVには値引列がありません';
+    chip.title = primary.hasDiscountColumn ? '' : 'このデータには値引列がありません';
   }
 
   function setTextWithPop(id, text) {
@@ -1899,7 +1899,7 @@
     if (dom['table-foot']) dom['table-foot'].replaceChildren();
     rowByIndex.clear();
     const tr = document.createElement('tr');
-    const td = createCell('CSVを読み込むと 08:00〜23:00 の時間帯別データを表示します', 'table-empty-cell');
+    const td = createCell('CSVまたはExcelを読み込むと 08:00〜23:00 の時間帯別データを表示します', 'table-empty-cell');
     td.colSpan = activeColumns().length;
     tr.appendChild(td);
     dom['table-body'].appendChild(tr);

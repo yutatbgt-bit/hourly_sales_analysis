@@ -16,7 +16,7 @@
   const SLOT_COUNT = HOUR_END - HOUR_START + 1;
 
   /** 入力の上限 (異常に大きいCSVによるブラウザのフリーズを防止) */
-  const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+  const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
   const MAX_ROWS = 2000;
   const MAX_COLS = 100;
   const MAX_CELL_LENGTH = 1000;
@@ -113,6 +113,11 @@
    * @returns {number|null}
    */
   function parseHour(raw) {
+    if (typeof raw === 'number' && raw > 0 && raw < 1) {
+      // Excel の時刻シリアル値 (1日=1.0) の対応
+      const hourFromSerial = Math.round(raw * 24);
+      if (hourFromSerial >= 0 && hourFromSerial <= 24) return hourFromSerial;
+    }
     const text = toHalfWidth(raw ?? '');
     const match = /^(\d{1,2})(?:[:：]\d{2})?(?:時)?/.exec(text);
     if (!match) return null;
@@ -480,14 +485,70 @@
       throw new CsvFormatError('空のファイルです。');
     }
     if (buffer.byteLength > MAX_FILE_SIZE_BYTES) {
-      throw new CsvFormatError('ファイルサイズが上限 (5MB) を超えています。');
+      throw new CsvFormatError('ファイルサイズが上限 (50MB) を超えています。');
     }
 
-    const text = decodeCsvBuffer(buffer);
-    const rows = splitCsvRows(text);
+    const ext = (fileName.slice((fileName.lastIndexOf('.') - 1 >>> 0) + 2) || '').toLowerCase();
+    const isExcel = ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext);
+    const isCsv = (ext === 'csv');
+
+    if (!isExcel && !isCsv) {
+      throw new CsvFormatError('サポートされていないファイル形式です。CSVまたはExcelファイル（.xlsx, .xls等）を指定してください。');
+    }
+
+    let rows;
+    if (isExcel) {
+      if (typeof global.XLSX === 'undefined') {
+        throw new CsvFormatError('Excel解析ライブラリ (XLSX) が読み込まれていません。');
+      }
+      let workbook;
+      try {
+        // Excel読み込み時: 計算式やHTML装飾を排除し、評価済みの「値のみ」を取得
+        workbook = global.XLSX.read(new Uint8Array(buffer), {
+          type: 'array',
+          cellFormula: false, // 計算式(.f)は読み込まず破棄
+          cellHTML: false,    // HTML装飾は除外
+          cellText: false,    // 書式化文字列ではなく生値
+          cellStyles: false,  // スタイル除外
+          raw: true           // 生の値のみ保持
+        });
+      } catch (e) {
+        throw new CsvFormatError('Excelファイルの読み込みに失敗しました: ' + (e.message || ''));
+      }
+
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        throw new CsvFormatError('Excelファイル内に有効なシートが存在しません。');
+      }
+
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      // 防御策: セルオブジェクト内に数式(.f)が残存している場合は完全に消去し「値のみ」にする
+      if (firstSheet) {
+        for (const cellKey in firstSheet) {
+          if (cellKey.charCodeAt(0) === 33) continue; // '!' で始まるメタデータ(!ref等)はスキップ
+          const cell = firstSheet[cellKey];
+          if (cell && typeof cell === 'object' && 'f' in cell) {
+            delete cell.f;
+          }
+        }
+      }
+
+      rows = global.XLSX.utils.sheet_to_json(firstSheet, {
+        header: 1,
+        defval: '',
+        raw: true // フォーマット文字列ではなく生の値（値のみ）を取得
+      });
+    } else {
+      const text = decodeCsvBuffer(buffer);
+      rows = splitCsvRows(text);
+    }
+
+    if (!rows || rows.length === 0) {
+      throw new CsvFormatError('データが空です。');
+    }
     const header = locateHeader(rows);
     if (!header) {
-      throw new CsvFormatError('「時間」「金額」の列見出しが見つかりません。時間帯別実績CSVを指定してください。');
+      throw new CsvFormatError('「時間」「金額」の列見出しが見つかりません。時間帯別実績データ（CSV/Excel）を指定してください。');
     }
     const missing = REQUIRED_COLUMNS.filter((key) => header.columnIndex[key] === undefined);
     if (missing.length > 0) {
