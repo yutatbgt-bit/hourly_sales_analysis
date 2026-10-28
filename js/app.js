@@ -107,7 +107,8 @@
     loadSequence: { main: 0, compare: 0 },
     statusTimerId: null,
     profiles: [HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト'],
-    currentProfile: HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト'
+    currentProfile: HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト',
+    currentViewMode: 'single' // 'single' | 'kanban'
   };
 
   const dom = {};
@@ -138,7 +139,10 @@
       'btn-add-more-files', 'btn-file-manager-done',
       'select-store-profile', 'btn-add-store-profile', 'btn-rename-store-profile', 'btn-delete-store-profile',
       'profile-dialog', 'profile-dialog-title', 'btn-close-profile-dialog', 'input-profile-name',
-      'profile-error-message', 'btn-cancel-profile-dialog', 'btn-save-profile-dialog'
+      'profile-error-message', 'btn-cancel-profile-dialog', 'btn-save-profile-dialog',
+      'btn-view-single', 'btn-view-kanban', 'kanban-view-container', 'kanban-grid', 'kanban-store-count-badge',
+      'delete-confirm-dialog', 'delete-dialog-title', 'btn-close-delete-dialog', 'delete-target-store-name', 'btn-cancel-delete-dialog', 'btn-confirm-delete-dialog',
+      'reset-confirm-dialog', 'reset-dialog-title', 'btn-close-reset-dialog', 'btn-cancel-reset-dialog', 'btn-confirm-reset-dialog'
     ];
     ids.forEach((id) => {
       const node = document.getElementById(id);
@@ -173,8 +177,38 @@
 
     dom['btn-export-png'].addEventListener('click', exportPng);
     dom['btn-toggle-table'].addEventListener('click', toggleTable);
-    dom['btn-reset-data'].addEventListener('click', resetAllData);
+    dom['btn-reset-data'].addEventListener('click', openResetConfirmDialog);
     dom['btn-theme-toggle'].addEventListener('click', toggleTheme);
+
+    // 表示ビュー切り替え (個別店舗 / 全店同時比較カンバン)
+    if (dom['btn-view-single']) {
+      dom['btn-view-single'].addEventListener('click', () => switchViewMode('single'));
+    }
+    if (dom['btn-view-kanban']) {
+      dom['btn-view-kanban'].addEventListener('click', () => switchViewMode('kanban'));
+    }
+
+    // 全店舗データ一括削除確認ダイアログ
+    if (dom['btn-close-reset-dialog']) {
+      dom['btn-close-reset-dialog'].addEventListener('click', closeResetConfirmDialog);
+    }
+    if (dom['btn-cancel-reset-dialog']) {
+      dom['btn-cancel-reset-dialog'].addEventListener('click', closeResetConfirmDialog);
+    }
+    if (dom['btn-confirm-reset-dialog']) {
+      dom['btn-confirm-reset-dialog'].addEventListener('click', executeResetAllStoresData);
+    }
+
+    // 店舗プロファイル削除確認ダイアログ
+    if (dom['btn-close-delete-dialog']) {
+      dom['btn-close-delete-dialog'].addEventListener('click', closeDeleteProfileDialog);
+    }
+    if (dom['btn-cancel-delete-dialog']) {
+      dom['btn-cancel-delete-dialog'].addEventListener('click', closeDeleteProfileDialog);
+    }
+    if (dom['btn-confirm-delete-dialog']) {
+      dom['btn-confirm-delete-dialog'].addEventListener('click', executeDeleteProfile);
+    }
 
     document.querySelectorAll('.metric-chip').forEach((chip) => {
       chip.addEventListener('click', () => toggleMetric(chip));
@@ -376,6 +410,8 @@
     const dataToSave = {
       rawMainFiles: state.rawMainFiles,
       rawCompareFiles: state.rawCompareFiles,
+      primary: state.primary,
+      compare: state.compare,
       aggMode: state.aggMode,
       timeBands: state.timeBands,
       visibility: state.visibility,
@@ -979,7 +1015,17 @@
     if (!HourlyStorage) return;
     try {
       const profiles = await HourlyStorage.getProfiles();
-      state.profiles = Array.isArray(profiles) && profiles.length > 0 ? profiles : [HourlyStorage.DEFAULT_PROFILE_NAME];
+      let list = Array.isArray(profiles) && profiles.length > 0 ? profiles : [HourlyStorage.DEFAULT_PROFILE_NAME];
+
+      // ユーザーの手動追加の手間を省くためのシード店舗統合（ハードコードではなく追加の意味で永続化）:
+      // 保存済み店舗が1店舗のみ、または店番付き店舗（^\d{3}-）が未反映の場合は、INITIAL_SEED_STORESの24店舗を自動追加・保存
+      const hasStoreCode = list.some((p) => /^\d{3}-/.test(p));
+      if (HourlyStorage.INITIAL_SEED_STORES && (list.length <= 1 || !hasStoreCode)) {
+        list = Array.from(HourlyStorage.INITIAL_SEED_STORES);
+        await HourlyStorage.saveProfiles(list);
+      }
+
+      state.profiles = list;
 
       const hashStore = getHashProfile();
       if (hashStore) {
@@ -1037,7 +1083,7 @@
       dom['btn-rename-store-profile'].addEventListener('click', () => openProfileDialog('rename'));
     }
     if (dom['btn-delete-store-profile']) {
-      dom['btn-delete-store-profile'].addEventListener('click', handleDeleteProfile);
+      dom['btn-delete-store-profile'].addEventListener('click', openDeleteProfileDialog);
     }
 
     if (dom['btn-close-profile-dialog']) {
@@ -1198,14 +1244,43 @@
     err.classList.remove('hidden');
   }
 
-  async function handleDeleteProfile() {
+  function openDeleteProfileDialog() {
     if (state.profiles.length <= 1) {
       showStatus('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
       return;
     }
+    const dialog = dom['delete-confirm-dialog'];
+    const targetNameEl = dom['delete-target-store-name'];
+    if (!dialog) return;
+
+    if (targetNameEl) {
+      targetNameEl.textContent = state.currentProfile;
+    }
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+  }
+
+  function closeDeleteProfileDialog() {
+    const dialog = dom['delete-confirm-dialog'];
+    if (!dialog) return;
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  async function executeDeleteProfile() {
+    if (state.profiles.length <= 1) {
+      closeDeleteProfileDialog();
+      showStatus('これ以上店舗プロファイルを削除できません（最低1店舗必要です）。', 'warning');
+      return;
+    }
     const targetName = state.currentProfile;
-    const confirmed = global.confirm('店舗プロファイル「' + targetName + '」を削除しますか？\n（この店舗の保存データも消去されます）');
-    if (!confirmed) return;
 
     if (HourlyStorage) {
       await HourlyStorage.deleteProfile(targetName);
@@ -1214,9 +1289,379 @@
     state.currentProfile = state.profiles[0] || (HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト');
     setHashProfile(state.currentProfile);
     renderProfileSelect();
+    closeDeleteProfileDialog();
+
     await restorePersistedState();
     renderBandSettingsList();
+
+    if (state.currentViewMode === 'kanban') {
+      await renderKanbanView();
+    }
+
     showStatus('店舗プロファイル「' + targetName + '」を削除しました。', 'info');
+  }
+
+  function openResetConfirmDialog() {
+    const dialog = dom['reset-confirm-dialog'];
+    const cancelBtn = dom['btn-cancel-reset-dialog'];
+    if (!dialog) return;
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute('open', '');
+    }
+    if (cancelBtn) cancelBtn.focus();
+  }
+
+  function closeResetConfirmDialog() {
+    const dialog = dom['reset-confirm-dialog'];
+    if (!dialog) return;
+    if (typeof dialog.close === 'function') {
+      dialog.close();
+    } else {
+      dialog.removeAttribute('open');
+    }
+  }
+
+  /**
+   * 全店舗の売上実績データを一括削除する実行処理
+   * - 登録済み店舗名プロファイル一覧は保持
+   * - 全店舗の保存データ（IndexedDB/localStorage）を一括クリア
+   * - メモリ上のデータセットを初期化し、即座にUIへ反映
+   */
+  async function executeResetAllStoresData() {
+    try {
+      if (HourlyStorage) {
+        await HourlyStorage.clearAllStoresData();
+      }
+
+      state.rawMainFiles = [];
+      state.rawCompareFiles = [];
+      state.primary = null;
+      state.compare = null;
+      state.loadSequence.main++;
+      state.loadSequence.compare++;
+      state.sort = { key: 'hour', direction: 'asc' };
+      state.activeRowIndex = null;
+      state.timeBands = JSON.parse(JSON.stringify(DEFAULT_TIME_BANDS));
+
+      updateFilePill('main', null);
+      updateFilePill('compare', null);
+      renderBandSettingsList();
+      updateDashboard();
+
+      if (global.HourlyChart && typeof global.HourlyChart.destroyKanbanCharts === 'function') {
+        global.HourlyChart.destroyKanbanCharts();
+      }
+
+      const kanbanBadge = dom['kanban-store-count-badge'];
+      if (kanbanBadge) {
+        kanbanBadge.textContent = 'データ連携: 0店舗';
+        kanbanBadge.classList.add('hidden');
+      }
+
+      await renderKanbanView();
+      closeResetConfirmDialog();
+      showStatus('全店舗の売上データを一括削除しました。', 'info');
+    } catch (err) {
+      console.error('[executeResetAllStoresData] 一括削除エラー:', err);
+      closeResetConfirmDialog();
+      showStatus('全店舗データの一括削除中にエラーが発生しました。', 'error');
+    }
+  }
+
+  /**
+   * 表示ビューモード切り替え (個別店舗 / 全店同時比較カンバン)
+   * @param {'single'|'kanban'} mode
+   */
+  async function switchViewMode(mode) {
+    state.currentViewMode = mode === 'kanban' ? 'kanban' : 'single';
+
+    const btnSingle = dom['btn-view-single'];
+    const btnKanban = dom['btn-view-kanban'];
+    const kanbanContainer = dom['kanban-view-container'];
+    const kpiSection = document.querySelector('.kpi-grid');
+    const chartCard = document.querySelector('.chart-card');
+    const tableContainer = dom['table-container'];
+    const btnToggleTable = dom['btn-toggle-table'];
+
+    if (state.currentViewMode === 'kanban') {
+      if (btnSingle) {
+        btnSingle.classList.remove('active');
+        btnSingle.setAttribute('aria-selected', 'false');
+      }
+      if (btnKanban) {
+        btnKanban.classList.add('active');
+        btnKanban.setAttribute('aria-selected', 'true');
+      }
+
+      if (kpiSection) kpiSection.classList.add('hidden');
+      if (chartCard) chartCard.classList.add('hidden');
+      if (tableContainer) tableContainer.classList.add('hidden');
+      if (btnToggleTable) btnToggleTable.style.display = 'none';
+      if (kanbanContainer) kanbanContainer.classList.remove('hidden');
+
+      // カンバンビュー切り替え前に現在の店舗データを確実にIndexedDBに同期
+      await persistCurrentState();
+      await renderKanbanView();
+    } else {
+      if (btnSingle) {
+        btnSingle.classList.add('active');
+        btnSingle.setAttribute('aria-selected', 'true');
+      }
+      if (btnKanban) {
+        btnKanban.classList.remove('active');
+        btnKanban.setAttribute('aria-selected', 'false');
+      }
+
+      if (kanbanContainer) kanbanContainer.classList.add('hidden');
+      if (kpiSection) kpiSection.classList.remove('hidden');
+      if (chartCard) chartCard.classList.remove('hidden');
+      if (btnToggleTable) btnToggleTable.style.display = '';
+
+      updateDashboard();
+    }
+  }
+
+  /**
+   * 登録店舗の2列カンバンビューを描画
+   * - データが入っている店舗のみを2列カンバンビューで表示（空カードはスキップ）
+   * - 各カードのヘッダーは各店舗名のみ表示（余計なチップや表は不要）
+   * - ユーザーが追加した店舗プロファイルを「追加された順番」で表示
+   * - データ連携店舗数バッジ（#kanban-store-count-badge）のゼロ同期
+   * - データ0件時はプレースホルダーを表示
+   */
+  async function renderKanbanView() {
+    const kanbanGrid = dom['kanban-grid'];
+    if (!kanbanGrid) return;
+
+    if (global.HourlyChart && typeof global.HourlyChart.destroyKanbanCharts === 'function') {
+      global.HourlyChart.destroyKanbanCharts();
+    }
+
+    while (kanbanGrid.firstChild) {
+      kanbanGrid.removeChild(kanbanGrid.firstChild);
+    }
+
+    const badgeEl = dom['kanban-store-count-badge'];
+    if (badgeEl) {
+      badgeEl.textContent = 'データ連携: 0店舗';
+      badgeEl.classList.add('hidden');
+    }
+
+    let persistedMap = {};
+    let hasPersistedData = false;
+    if (HourlyStorage) {
+      try {
+        const allPersisted = await HourlyStorage.loadAllProfilesState();
+        if (Array.isArray(allPersisted)) {
+          allPersisted.forEach((item) => {
+            if (item && item.state) {
+              let prim = item.state.primary;
+              let comp = item.state.compare;
+
+              // primary/compare が未保存の場合は rawMainFiles/rawCompareFiles から集約復元
+              if (!prim && Array.isArray(item.state.rawMainFiles) && item.state.rawMainFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+                try {
+                  prim = Parser.aggregate(item.state.rawMainFiles, item.state.aggMode || 'sum');
+                } catch (ex) {
+                  prim = null;
+                }
+              }
+              if (!comp && Array.isArray(item.state.rawCompareFiles) && item.state.rawCompareFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+                try {
+                  comp = Parser.aggregate(item.state.rawCompareFiles, item.state.aggMode || 'sum');
+                } catch (ex) {
+                  comp = null;
+                }
+              }
+
+              const hasData = Boolean(
+                (prim && Array.isArray(prim.slots) && prim.slots.length > 0) ||
+                (comp && Array.isArray(comp.slots) && comp.slots.length > 0)
+              );
+              if (hasData) {
+                hasPersistedData = true;
+                persistedMap[item.profileName] = {
+                  primary: prim,
+                  compare: comp,
+                  rawMainFiles: item.state.rawMainFiles,
+                  rawCompareFiles: item.state.rawCompareFiles
+                };
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('[renderKanbanView] loadAllProfilesState failed:', e);
+      }
+    }
+
+    const currentHasData = Boolean(
+      (state.primary && Array.isArray(state.primary.slots)) ||
+      (state.compare && Array.isArray(state.compare.slots))
+    );
+    if (currentHasData) {
+      persistedMap[state.currentProfile] = {
+        primary: state.primary,
+        compare: state.compare,
+        rawMainFiles: state.rawMainFiles,
+        rawCompareFiles: state.rawCompareFiles
+      };
+    }
+
+    const hasAnyData = hasPersistedData || currentHasData;
+
+    if (!hasAnyData) {
+      if (badgeEl) {
+        badgeEl.textContent = 'データ連携: 0店舗';
+        badgeEl.classList.add('hidden');
+      }
+      const ph = document.createElement('div');
+      ph.className = 'kanban-placeholder';
+      const icon = document.createElement('div');
+      icon.className = 'kanban-placeholder-icon';
+      icon.textContent = '📊';
+      const p1 = document.createElement('p');
+      p1.className = 'placeholder-text';
+      p1.textContent = 'CSVまたはExcelファイルをアップロードすると、比較グラフが2列カンバンビューで表示されます';
+      const p2 = document.createElement('p');
+      p2.className = 'placeholder-subtext';
+      p2.textContent = '画面右上の「分析データアップロード」「比較データアップロード」からファイルを選択、または店舗ごとにアップロードしてください';
+      ph.appendChild(icon);
+      ph.appendChild(p1);
+      ph.appendChild(p2);
+      kanbanGrid.appendChild(ph);
+      return;
+    }
+
+    const storeNames = [];
+    const seenStores = new Set();
+
+    function addStore(name) {
+      if (!name || typeof name !== 'string') return;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === '空店舗') return;
+      if (!seenStores.has(trimmed)) {
+        seenStores.add(trimmed);
+        storeNames.push(trimmed);
+      }
+    }
+
+    if (Array.isArray(state.profiles)) {
+      state.profiles.forEach((p) => addStore(p));
+    }
+    Object.keys(persistedMap).forEach((k) => addStore(k));
+
+    if (storeNames.length === 0) {
+      addStore(HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト');
+    }
+
+    let storesWithDataCount = 0;
+
+    storeNames.forEach((storeName) => {
+      let primaryData = null;
+      let compareData = null;
+
+      // 1. 完全一致
+      let saved = persistedMap[storeName];
+
+      // 2. 店舗名の動的表記ゆれ・店番プレフィックスの自動吸収（Parser.matchStoreName）
+      if (!saved && Parser && typeof Parser.matchStoreName === 'function') {
+        for (const k in persistedMap) {
+          if (Parser.matchStoreName(k, storeName)) {
+            saved = persistedMap[k];
+            break;
+          }
+        }
+      }
+
+      if (saved) {
+        if (saved.primary && Array.isArray(saved.primary.slots)) {
+          primaryData = saved.primary;
+        }
+        if (saved.compare && Array.isArray(saved.compare.slots)) {
+          compareData = saved.compare;
+        }
+      }
+
+      // 現在選択中の店舗メモリ上のデータをフォールバック
+      if (storeName === state.currentProfile || (Parser && typeof Parser.matchStoreName === 'function' && Parser.matchStoreName(storeName, state.currentProfile))) {
+        if (!primaryData && state.primary) primaryData = state.primary;
+        if (!compareData && state.compare) compareData = state.compare;
+      }
+
+      const hasStoreData = Boolean(
+        (primaryData && Array.isArray(primaryData.slots)) ||
+        (compareData && Array.isArray(compareData.slots))
+      );
+
+      if (!hasStoreData) return;
+
+      storesWithDataCount++;
+
+      const card = document.createElement('div');
+      card.className = 'kanban-card has-data';
+
+      const header = document.createElement('div');
+      header.className = 'kanban-card-header';
+
+      const title = document.createElement('h4');
+      title.className = 'kanban-store-title';
+      title.textContent = storeName;
+      header.appendChild(title);
+
+      const tag = document.createElement('span');
+      tag.className = 'kanban-store-tag tag-ready';
+      tag.textContent = '連携済';
+      header.appendChild(tag);
+
+      card.appendChild(header);
+
+      const chartWrapper = document.createElement('div');
+      chartWrapper.className = 'kanban-chart-wrapper';
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'kanban-chart-canvas';
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', storeName + ' 時間帯別売上・客数グラフ');
+      chartWrapper.appendChild(canvas);
+
+      card.appendChild(chartWrapper);
+      kanbanGrid.appendChild(card);
+
+      if (global.HourlyChart && typeof global.HourlyChart.renderKanbanChart === 'function') {
+        global.HourlyChart.renderKanbanChart(canvas, primaryData, compareData);
+      }
+    });
+
+    if (storesWithDataCount === 0) {
+      const ph = document.createElement('div');
+      ph.className = 'kanban-placeholder';
+      const icon = document.createElement('div');
+      icon.className = 'kanban-placeholder-icon';
+      icon.textContent = '📊';
+      const p1 = document.createElement('p');
+      p1.className = 'placeholder-text';
+      p1.textContent = '現在、売上データが読み込まれている店舗がありません';
+      const p2 = document.createElement('p');
+      p2.className = 'placeholder-subtext';
+      p2.textContent = '画面右上の「分析データアップロード」「比較データアップロード」からファイルを選択、または店舗ごとにアップロードしてください';
+      ph.appendChild(icon);
+      ph.appendChild(p1);
+      ph.appendChild(p2);
+      kanbanGrid.appendChild(ph);
+    }
+
+    if (badgeEl) {
+      if (storesWithDataCount > 0) {
+        badgeEl.textContent = 'データ連携: ' + storesWithDataCount + '店舗';
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.textContent = 'データ連携: 0店舗';
+        badgeEl.classList.add('hidden');
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2074,7 +2519,13 @@
     button.setAttribute('aria-pressed', String(isLight));
     button.setAttribute('aria-label', label);
     button.title = label + 'ます';
-    if (shouldRerender && state.primary) updateDashboard();
+    if (shouldRerender) {
+      if (state.currentViewMode === 'kanban') {
+        renderKanbanView();
+      } else if (state.primary) {
+        updateDashboard();
+      }
+    }
   }
 
   if (document.readyState === 'loading') {

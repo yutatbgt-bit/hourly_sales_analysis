@@ -992,6 +992,179 @@
     }, 'image/png');
   }
 
+  const kanbanCharts = new Map();
+
+  function destroyKanbanCharts() {
+    kanbanCharts.forEach((chart) => {
+      try {
+        chart.destroy();
+      } catch (e) {}
+    });
+    kanbanCharts.clear();
+  }
+
+  /**
+   * カンバンカード用のコンパクト時間帯グラフを描画
+   * - 余計なチップや表は置かず、時間帯推移（売上棒＋客数線）を美しく表示
+   * @param {HTMLCanvasElement} canvas
+   * @param {object|null} primaryData
+   * @param {object|null} compareData
+   */
+  function renderKanbanChart(canvas, primaryData, compareData) {
+    if (!canvas || !(canvas instanceof HTMLCanvasElement)) return null;
+
+    if (kanbanCharts.has(canvas)) {
+      try { kanbanCharts.get(canvas).destroy(); } catch (e) {}
+      kanbanCharts.delete(canvas);
+    }
+
+    const hasPrimary = Boolean(primaryData && Array.isArray(primaryData.slots));
+    const hasCompare = Boolean(compareData && Array.isArray(compareData.slots));
+    if (!hasPrimary && !hasCompare) return null;
+
+    const sourceData = hasPrimary ? primaryData : compareData;
+    const labels = sourceData.slots.map((s) => s.label);
+    const theme = readTheme();
+
+    const datasets = [];
+
+    // 1. 分析データ（主データ）
+    if (hasPrimary) {
+      datasets.push({
+        label: '売上',
+        type: 'bar',
+        data: primaryData.slots.map((s) => (s.hasData ? s.sales : null)),
+        yAxisID: 'ySales',
+        backgroundColor: withAlpha(theme.colors.sales, 0.75),
+        borderColor: theme.colors.sales,
+        borderWidth: 1,
+        borderRadius: 3,
+        order: 10
+      });
+      datasets.push({
+        label: '客数',
+        type: 'line',
+        data: primaryData.slots.map((s) => (s.hasData ? s.customers : null)),
+        yAxisID: 'yCount',
+        borderColor: theme.colors.customers,
+        backgroundColor: theme.colors.customers,
+        borderWidth: 2,
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
+        tension: 0.25,
+        order: 2
+      });
+    }
+
+    // 2. 比較データ（重ね合わせ）
+    if (hasCompare) {
+      datasets.push({
+        label: '売上(比較)',
+        type: 'bar',
+        data: compareData.slots.map((s) => (s.hasData ? s.sales : null)),
+        yAxisID: 'ySales',
+        backgroundColor: withAlpha(theme.colors.sales, 0.3),
+        borderColor: withAlpha(theme.colors.sales, 0.6),
+        borderWidth: 1,
+        borderRadius: 3,
+        order: 11
+      });
+      datasets.push({
+        label: '客数(比較)',
+        type: 'line',
+        data: compareData.slots.map((s) => (s.hasData ? s.customers : null)),
+        yAxisID: 'yCount',
+        borderColor: withAlpha(theme.colors.customers, 0.6),
+        borderDash: [4, 3],
+        pointRadius: 2,
+        tension: 0.25,
+        order: 3
+      });
+    }
+
+    const config = {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              color: theme.textMuted,
+              font: { family: FONT_NUM, size: 10.5 }
+            }
+          },
+          tooltip: {
+            enabled: true,
+            backgroundColor: 'rgba(10, 18, 36, 0.94)',
+            titleColor: '#ffffff',
+            bodyColor: '#e2e8f0',
+            borderColor: 'rgba(255, 255, 255, 0.15)',
+            borderWidth: 1,
+            padding: 8,
+            titleFont: { size: 11 },
+            bodyFont: { size: 11 },
+            callbacks: {
+              label: (ctx) => {
+                const val = ctx.raw;
+                if (val === null || val === undefined) return ctx.dataset.label + ': -';
+                if (ctx.dataset.yAxisID === 'ySales') {
+                  return ctx.dataset.label + ': ¥' + Math.round(val).toLocaleString();
+                }
+                return ctx.dataset.label + ': ' + Math.round(val).toLocaleString() + '人';
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              color: theme.textMuted,
+              font: { family: FONT_NUM, size: 9.5 },
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 8
+            }
+          },
+          ySales: {
+            type: 'linear',
+            position: 'left',
+            beginAtZero: true,
+            grid: { color: theme.grid },
+            ticks: {
+              color: theme.textMuted,
+              font: { family: FONT_NUM, size: 9 },
+              callback: (v) => (v >= 10000 ? (v / 10000) + '万' : v)
+            }
+          },
+          yCount: {
+            type: 'linear',
+            position: 'right',
+            beginAtZero: true,
+            grid: { display: false },
+            ticks: {
+              color: theme.textMuted,
+              font: { family: FONT_NUM, size: 9 },
+              callback: (v) => v + '人'
+            }
+          }
+        }
+      }
+    };
+
+    const chart = new global.Chart(canvas, config);
+    kanbanCharts.set(canvas, chart);
+    return chart;
+  }
+
   function destroyMainChart() {
     if (mainChart) {
       mainChart.canvas.removeEventListener('mousemove', handleCanvasMouseMove);
@@ -1004,6 +1177,7 @@
 
   function destroyAll() {
     destroyMainChart();
+    destroyKanbanCharts();
     sparkCharts.forEach((chart) => chart.destroy());
     sparkCharts.clear();
     renderState.primary = null;
@@ -1013,6 +1187,8 @@
   global.HourlyChart = Object.freeze({
     METRICS,
     renderMain: renderMainChart,
+    renderKanbanChart,
+    destroyKanbanCharts,
     renderSparkline,
     renderBandSparkline,
     setMetricVisibility,

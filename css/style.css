@@ -2539,3 +2539,290 @@ button.file-pill:hover {
   background: rgba(0, 0, 0, 0.03);
 }
 
+/* 削除確認ボタン */
+.btn-delete-confirm {
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+}
+
+.btn-delete-confirm:hover {
+  background: #b91c1c !important;
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.45) !important;
+}
+
+.delete-dialog-message {
+  font-size: 14px;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.delete-dialog-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+   表示ビュー切り替えタブ (個別店舗 / 全店同時比較)
+   ========================================================================== */
+
+.view-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+  user-select: none;
+}
+
+.btn-view-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-base);
+  white-space: nowrap;
+}
+
+.btn-view-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-view-tab.active {
+  background: linear-gradient(135deg, var(--accent-blue), #0284c7);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+:root[data-theme="light"] .view-toggle-group {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: #cbd5e1;
+}
+
+:root[data-theme="light"] .btn-view-tab {
+  color: #64748b;
+  border: 1px solid transparent;
+}
+
+:root[data-theme="light"] .btn-view-tab:hover {
+  color: #0f172a;
+  background: rgba(2, 132, 199, 0.08);
+}
+
+:root[data-theme="light"] .btn-view-tab.active {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.35);
+}
+
+/* ==========================================================================
+   2-Column Kanban View for All Stores (全店舗 同時比較)
+   ========================================================================== */
+
+.kanban-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.kanban-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+.kanban-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kanban-main-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--title-color);
+  letter-spacing: -0.01em;
+}
+
+.kanban-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--primary-glow);
+  color: var(--primary);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+:root[data-theme="light"] .kanban-badge {
+  border-color: rgba(180, 83, 9, 0.3);
+}
+
+.kanban-legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* 2列カンバングリッド */
+.kanban-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+}
+
+@media (max-width: 992px) {
+  .kanban-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 個別店舗のグラフィックカード (ヘッダーは店舗名のみ) */
+.kanban-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem 1.25rem 1.25rem;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.kanban-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px 0 rgba(0, 0, 0, 0.45);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+:root[data-theme="light"] .kanban-card:hover {
+  box-shadow: 0 8px 20px 0 rgba(15, 23, 42, 0.12);
+  border-color: rgba(2, 132, 199, 0.4);
+}
+
+/* カードヘッダー: 店舗名のみ表示 */
+.kanban-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.65rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.kanban-store-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--title-color);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.kanban-store-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  background: linear-gradient(to bottom, var(--primary), var(--accent-blue));
+  border-radius: 2px;
+}
+
+.kanban-store-tag {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--card-border);
+}
+
+.kanban-store-tag.tag-ready {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .kanban-store-tag {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+:root[data-theme="light"] .kanban-store-tag.tag-ready {
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.1);
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+.kanban-card.has-data {
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+:root[data-theme="light"] .kanban-card.has-data {
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+/* グラフ描画ラッパー */
+.kanban-chart-wrapper {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  min-height: 280px;
+}
+
+.kanban-chart-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+/* カンバンプレースホルダー */
+.kanban-placeholder {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  background: var(--card-bg);
+  border: 1px dashed var(--card-border);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.kanban-placeholder-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+

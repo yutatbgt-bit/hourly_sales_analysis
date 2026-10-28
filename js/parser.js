@@ -83,6 +83,42 @@
   }
 
   /**
+   * 単一シートファイル（Sheet1等）の店舗化バグ防止用判定
+   * 汎用システムシート名の場合は店舗名として採用しない
+   */
+  function isGenericOrSystemSheet(name) {
+    if (!name || typeof name !== 'string') return true;
+    const t = name.trim();
+    if (!t) return true;
+    return /^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*|空店舗|全店舗|全店合計)$/i.test(t);
+  }
+
+  /**
+   * 店舗名の動的表記ゆれ照合（ハードコード完全排除）
+   * 全角半角・空白・店番プレフィックス（002- 等）・「店」の有無を正規化して照合
+   */
+  function matchStoreName(target, candidate) {
+    if (!target || !candidate) return false;
+    const cleanPrefix = (s) => String(s).trim().replace(/[\s　]+/g, '').toLowerCase()
+      .replace(/^\d{2,4}[-_/・:：\s]?/, ''); // 店番（002-, 011_ 等）を除去
+    const t = String(target).trim().replace(/[\s　]+/g, '').toLowerCase();
+    const c = String(candidate).trim().replace(/[\s　]+/g, '').toLowerCase();
+    if (t === c) return true;
+
+    const tNorm = cleanPrefix(t);
+    const cNorm = cleanPrefix(c);
+    if (tNorm && tNorm === cNorm) return true;
+
+    const tClean = tNorm.replace(/店$/, '');
+    const cClean = cNorm.replace(/店$/, '');
+    if (tClean && tClean === cClean) return true;
+    if (tClean.length >= 2 && cClean.length >= 2) {
+      if (tClean.includes(cClean) || cClean.includes(tClean)) return true;
+    }
+    return false;
+  }
+
+  /**
    * "¥1,234 " / "2,057" / "1.50%" / "▲500" / "(500)" を数値化する。
    * @returns {number|null} 数値化不能・空は null
    */
@@ -799,6 +835,8 @@
     parse: parseHourlySalesCsv,
     aggregate: aggregateDataSets,
     sanitizeDisplayText,
+    isGenericOrSystemSheet,
+    matchStoreName,
     CsvFormatError,
     HOUR_START,
     HOUR_END,
