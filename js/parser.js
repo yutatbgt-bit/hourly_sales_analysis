@@ -145,6 +145,44 @@
   }
 
   /**
+   * 率 (値引率・割引率など) をパーセント数値 (0〜100基準) に正規化してパースする。
+   * - "1.50%" / "1.50" など既に % 単位の場合はそのまま
+   * - "0.0150" などの小数 (比率: 0〜1) で格納されている場合は 100倍して 1.50 に正規化
+   * - computedRate (検算値) が渡された場合は、乖離が小さい方を自動選択して確実に判定
+   * @param {*} raw
+   * @param {number|null} [computedRate]
+   * @returns {number|null}
+   */
+  function parseRate(raw, computedRate = null) {
+    if (raw === null || raw === undefined) return null;
+    const text = toHalfWidth(raw).trim();
+    if (text === '' || text === '-' || text === '—') return null;
+
+    const hasPercent = text.includes('%');
+    const num = parseNumber(text);
+    if (num === null) return null;
+
+    if (hasPercent) {
+      return num;
+    }
+
+    if (computedRate !== null && Number.isFinite(computedRate) && computedRate !== 0) {
+      const diffDirect = Math.abs(num - computedRate);
+      const diffScaled = Math.abs(num * 100 - computedRate);
+      if (diffScaled < diffDirect) {
+        return num * 100;
+      }
+      return num;
+    }
+
+    if (Math.abs(num) <= 1.0 && num !== 0) {
+      return num * 100;
+    }
+
+    return num;
+  }
+
+  /**
    * "08:00" / "8:00" / "8" / "8時" / "08:00-09:00" から「時」を取り出す。
    * @returns {number|null}
    */
@@ -332,14 +370,28 @@
         return null;
       };
 
+      const pickRaw = (labels) => {
+        for (let i = 0; i < labels.length; i++) {
+          const idx = normalized.indexOf(labels[i]);
+          if (idx !== -1) {
+            const raw = valueRow[idx];
+            if (raw !== null && raw !== undefined && String(raw).trim() !== '') return raw;
+          }
+        }
+        return null;
+      };
+
       const sales = pick(['総金額', '店舗合計', '合計金額', '金額']);
       if (sales !== null) {
+        const discount = pick(['総割引', '総値引', '値引', '割引', '値引金額', '割引金額']);
+        const rawDiscountRate = pickRaw(['割引率', '値引率']);
+        const computedDiscountRate = calcDiscountRate(discount, sales);
         return {
           sales,
           customers: pick(['総客数', '客数']),
           items: pick(['総打数', '打数', '総点数', '点数']),
-          discount: pick(['総割引', '総値引', '値引', '割引', '値引金額', '割引金額']),
-          discountRate: pick(['割引率', '値引率'])
+          discount,
+          discountRate: parseRate(rawDiscountRate, computedDiscountRate)
         };
       }
     }
@@ -424,12 +476,18 @@
       slot.customers = customers;
       slot.items = items;
       slot.discount = parseNumber(cell(row, 'discount'));
-      slot.discountRate = parseNumber(cell(row, 'discountRate'));
+      const rawDiscountRate = cell(row, 'discountRate');
+      const rawCumDiscountRate = cell(row, 'cumDiscountRate');
       slot.cumSales = parseNumber(cell(row, 'cumSales'));
       slot.cumCustomers = parseNumber(cell(row, 'cumCustomers'));
       slot.cumItems = parseNumber(cell(row, 'cumItems'));
       slot.cumDiscount = parseNumber(cell(row, 'cumDiscount'));
-      slot.cumDiscountRate = parseNumber(cell(row, 'cumDiscountRate'));
+
+      const computedRate = calcDiscountRate(slot.discount, slot.sales);
+      slot.discountRate = parseRate(rawDiscountRate, computedRate);
+
+      const computedCumRate = calcDiscountRate(slot.cumDiscount, slot.cumSales);
+      slot.cumDiscountRate = parseRate(rawCumDiscountRate, computedCumRate);
     }
 
     if (duplicateHours.size > 0) {
@@ -457,7 +515,11 @@
       if (slot.cumCustomers === null) slot.cumCustomers = running.customers;
       if (slot.cumItems === null) slot.cumItems = running.items;
       if (slot.cumDiscount === null && slot.discount !== null) slot.cumDiscount = running.discount;
-      if (slot.cumDiscountRate === null) slot.cumDiscountRate = calcDiscountRate(slot.cumDiscount, slot.cumSales);
+      if (slot.cumDiscountRate === null) {
+        slot.cumDiscountRate = calcDiscountRate(slot.cumDiscount, slot.cumSales);
+      } else {
+        slot.cumDiscountRate = parseRate(slot.cumDiscountRate, calcDiscountRate(slot.cumDiscount, slot.cumSales));
+      }
 
       slot.avgSpend = safeDivide(slot.sales, slot.customers);
       slot.avgItemPrice = safeDivide(slot.sales, slot.items);
@@ -843,7 +905,7 @@
     SLOT_COUNT,
     MAX_FILE_SIZE_BYTES,
     // テスト用に公開 (副作用なしの純粋関数)
-    _internal: Object.freeze({ parseNumber, parseHour, splitCsvRows, calcDiscountRate, parseDateText })
+    _internal: Object.freeze({ parseNumber, parseRate, parseHour, splitCsvRows, calcDiscountRate, parseDateText })
   });
 })(window);
 

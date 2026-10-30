@@ -2311,11 +2311,11 @@
       items: t.items,
       discount: t.discount,
       discountRate: t.discountRate,
-      cumSales: lastActive ? lastActive.cumSales : null,
-      cumCustomers: lastActive ? lastActive.cumCustomers : null,
-      cumItems: lastActive ? lastActive.cumItems : null,
-      cumDiscount: lastActive ? lastActive.cumDiscount : null,
-      cumDiscountRate: lastActive ? lastActive.cumDiscountRate : null
+      cumSales: t.sales ?? (lastActive ? lastActive.cumSales : null),
+      cumCustomers: t.customers ?? (lastActive ? lastActive.cumCustomers : null),
+      cumItems: t.items ?? (lastActive ? lastActive.cumItems : null),
+      cumDiscount: t.discount ?? (lastActive ? lastActive.cumDiscount : null),
+      cumDiscountRate: t.discountRate ?? (lastActive ? lastActive.cumDiscountRate : null)
     };
 
     const tr = document.createElement('tr');
