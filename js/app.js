@@ -1606,10 +1606,65 @@
       const header = document.createElement('div');
       header.className = 'kanban-card-header';
 
+      // 店舗名と時間累計対比バッジ（売上対比・客数対比）のコンテナ
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'kanban-title-wrap';
+
       const title = document.createElement('h4');
       title.className = 'kanban-store-title';
       title.textContent = storeName;
-      header.appendChild(title);
+      titleWrap.appendChild(title);
+
+      // 時間累計の売上対比と客数対比を算出（現時間帯までの累計）
+      let cutoffIdx = -1;
+      if (primaryData && Array.isArray(primaryData.slots)) {
+        for (let i = primaryData.slots.length - 1; i >= 0; i--) {
+          if (primaryData.slots[i].hasData) {
+            cutoffIdx = i;
+            break;
+          }
+        }
+      }
+
+      const curSlot = (cutoffIdx !== -1 && primaryData && primaryData.slots) ? primaryData.slots[cutoffIdx] : null;
+      const cmpSlot = (cutoffIdx !== -1 && compareData && compareData.slots) ? compareData.slots[cutoffIdx] : null;
+
+      const curSales = curSlot && Fmt.isNum(curSlot.cumSales) ? curSlot.cumSales : (primaryData && primaryData.totals ? primaryData.totals.sales : null);
+      const curCust = curSlot && Fmt.isNum(curSlot.cumCustomers) ? curSlot.cumCustomers : (primaryData && primaryData.totals ? primaryData.totals.customers : null);
+
+      const cmpSales = cmpSlot && Fmt.isNum(cmpSlot.cumSales) ? cmpSlot.cumSales : (compareData && compareData.totals ? compareData.totals.sales : null);
+      const cmpCust = cmpSlot && Fmt.isNum(cmpSlot.cumCustomers) ? cmpSlot.cumCustomers : (compareData && compareData.totals ? compareData.totals.customers : null);
+
+      const createStatBadge = (label, curVal, cmpVal, isYen = false) => {
+        const badge = document.createElement('span');
+        badge.className = 'kanban-stat-badge badge-neutral';
+
+        if (Fmt.isNum(curVal) && Fmt.isNum(cmpVal) && cmpVal > 0) {
+          const r = Fmt.ratio(curVal, cmpVal);
+          if (Fmt.isNum(r)) {
+            const diff = r - 100;
+            const tone = diff > 0 ? 'badge-up' : (diff < 0 ? 'badge-down' : 'badge-neutral');
+            badge.className = 'kanban-stat-badge ' + tone;
+            badge.textContent = label + ' ' + Fmt.ratioText(r);
+            const curStr = isYen ? Fmt.yen(curVal) : Fmt.integer(curVal, '人');
+            const cmpStr = isYen ? Fmt.yen(cmpVal) : Fmt.integer(cmpVal, '人');
+            const timeStr = curSlot ? '（〜' + curSlot.label + '）' : '';
+            badge.setAttribute('title', label + ' ' + timeStr + '\n分析: ' + curStr + ' ／ 比較: ' + cmpStr);
+            return badge;
+          }
+        }
+
+        badge.textContent = label + ' -';
+        return badge;
+      };
+
+      const badgesWrap = document.createElement('div');
+      badgesWrap.className = 'kanban-stats-badges';
+      badgesWrap.appendChild(createStatBadge('売上対比', curSales, cmpSales, true));
+      badgesWrap.appendChild(createStatBadge('客数対比', curCust, cmpCust, false));
+      titleWrap.appendChild(badgesWrap);
+
+      header.appendChild(titleWrap);
 
       const tag = document.createElement('span');
       tag.className = 'kanban-store-tag tag-ready';
