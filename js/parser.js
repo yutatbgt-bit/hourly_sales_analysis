@@ -332,6 +332,25 @@
     return match ? parseDateText(match[1] + '/' + match[2] + '/' + match[3]) : null;
   }
 
+  /** ファイル名から店番・店舗名の抽出（例: 002王子店, 011_塚口店, 夙川店等） */
+  function parseStoreFromFileName(fileName) {
+    if (!fileName || typeof fileName !== 'string') return null;
+    const clean = fileName.replace(/\.[^.]+$/, ''); // 拡張子除去
+    // パターン1: 3〜4桁店番 + 店舗名 (例: 002王子店, 002-王子店, 011_塚口, 012夙川)
+    const m1 = /(?:^|[^0-9])(\d{2,4})[-_/・:：\s]?([\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,10}(?:店)?)/.exec(clean);
+    if (m1) {
+      const num = m1[1];
+      const name = m1[2].endsWith('店') ? m1[2] : (m1[2] + '店');
+      return `${num}-${name}`;
+    }
+    // パターン2: 店舗名のみ (例: 王子店, 塚口店, 夙川店)
+    const m2 = /([\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,8}店)/.exec(clean);
+    if (m2 && !isGenericOrSystemSheet(m2[1])) {
+      return m2[1];
+    }
+    return null;
+  }
+
   /** 「時間」と「金額」を含む行をヘッダとみなし、列キー→列番号のマップを返す */
   function locateHeader(rows) {
     for (let r = 0; r < rows.length; r++) {
@@ -575,7 +594,7 @@
    * @param {ArrayBuffer} buffer
    * @param {string} fileName
    */
-  function parseHourlySalesCsv(buffer, fileName) {
+  function parseHourlySalesCsv(buffer, fileName, options = null) {
     if (!(buffer instanceof ArrayBuffer)) {
       throw new CsvFormatError('ファイルの読み込みに失敗しました。');
     }
@@ -618,7 +637,8 @@
         throw new CsvFormatError('Excelファイル内に有効なシートが存在しません。');
       }
 
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const targetSheetName = (options && options.sheetName) ? options.sheetName : workbook.SheetNames[0];
+      const firstSheet = workbook.Sheets[targetSheetName] || workbook.Sheets[workbook.SheetNames[0]];
 
       // 防御策: セルオブジェクト内に数式(.f)が残存している場合は完全に消去し「値のみ」にする
       if (firstSheet) {
@@ -679,7 +699,16 @@
     const safeFileName = sanitizeDisplayText(fileName, 120);
     const dateInfo = parseDateText(findLabeledValue(rows, ['年月日', '日付', '営業日'], header.headerRowIndex))
       || parseDateFromFileName(fileName);
-    const storeName = sanitizeDisplayText(findLabeledValue(rows, ['店名', '店舗名', '店舗'], header.headerRowIndex) || '店舗名不明');
+    let storeName = sanitizeDisplayText(findLabeledValue(rows, ['店名', '店舗名', '店舗'], header.headerRowIndex) || '');
+    if (!storeName || storeName === '店舗名不明' || isGenericOrSystemSheet(storeName)) {
+      if (options && options.sheetName && !isGenericOrSystemSheet(options.sheetName)) {
+        storeName = sanitizeDisplayText(options.sheetName);
+      } else {
+        const fromFile = parseStoreFromFileName(fileName);
+        if (fromFile) storeName = fromFile;
+        else storeName = '店舗名不明';
+      }
+    }
 
     let dateLabel = '日付不明';
     let isoDate = null;
@@ -893,8 +922,66 @@
     };
   }
 
+  /**
+   * Excel内の全店舗シートまたはCSVを解析し、店舗ごとのデータセット一覧を返す
+   * @param {ArrayBuffer} buffer
+   * @param {string} fileName
+   * @returns {Array<object>} 解析済みデータセットの配列
+   */
+  function parseAllStoreSheets(buffer, fileName) {
+    const ext = (fileName.slice((fileName.lastIndexOf('.') - 1 >>> 0) + 2) || '').toLowerCase();
+    const isExcel = ['xlsx', 'xls', 'xlsm', 'xlsb'].includes(ext);
+    if (!isExcel) {
+      return [parseHourlySalesCsv(buffer, fileName)];
+    }
+
+    if (typeof global.XLSX === 'undefined') {
+      return [parseHourlySalesCsv(buffer, fileName)];
+    }
+
+    let workbook;
+    try {
+      workbook = global.XLSX.read(new Uint8Array(buffer), {
+        type: 'array',
+        cellFormula: false,
+        cellHTML: false,
+        cellText: false,
+        cellStyles: false,
+        raw: true
+      });
+    } catch (e) {
+      return [parseHourlySalesCsv(buffer, fileName)];
+    }
+
+    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+      return [parseHourlySalesCsv(buffer, fileName)];
+    }
+
+    // 単一シートの場合は通常解析
+    if (workbook.SheetNames.length === 1) {
+      return [parseHourlySalesCsv(buffer, fileName, { sheetName: workbook.SheetNames[0] })];
+    }
+
+    const results = [];
+    for (const sName of workbook.SheetNames) {
+      if (isGenericOrSystemSheet(sName)) continue;
+      try {
+        const ds = parseHourlySalesCsv(buffer, fileName, { sheetName: sName });
+        if (ds && Array.isArray(ds.slots) && ds.slots.some((s) => s.hasData)) {
+          results.push(ds);
+        }
+      } catch (err) {
+        // 対象シートが売上テーブルでない場合はスキップ
+      }
+    }
+
+    return results.length > 0 ? results : [parseHourlySalesCsv(buffer, fileName)];
+  }
+
   global.HourlyParser = Object.freeze({
     parse: parseHourlySalesCsv,
+    parseAllStoreSheets,
+    parseStoreFromFileName,
     aggregate: aggregateDataSets,
     sanitizeDisplayText,
     isGenericOrSystemSheet,

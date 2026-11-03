@@ -669,9 +669,16 @@
 
       try {
         let buffer = await file.arrayBuffer();
-        const ds = Parser.parse(buffer, file.name);
+        let extractedSets = [];
+        if (Parser && typeof Parser.parseAllStoreSheets === 'function') {
+          extractedSets = Parser.parseAllStoreSheets(buffer, file.name);
+        } else {
+          extractedSets = [Parser.parse(buffer, file.name)];
+        }
         buffer = null; // バイナリバッファの参照を即時破棄してメモリ解放
-        parsedSets.push(ds);
+        if (Array.isArray(extractedSets) && extractedSets.length > 0) {
+          parsedSets.push(...extractedSets);
+        }
       } catch (err) {
         errors.push(file.name + ': ' + (err.message || '形式不正'));
       }
@@ -701,9 +708,57 @@
       }
     });
 
+    // 店舗固有ファイルが検出された場合、該当店舗のプロファイルへ自動保存＆プロファイル登録
+    try {
+      const storeGroup = new Map();
+      parsedSets.forEach((ds) => {
+        if (!ds || !ds.meta) return;
+        const sName = ds.meta.storeName || '';
+        if (sName && sName !== '店舗名不明' && sName !== '全店' && (!Parser || !Parser.isGenericOrSystemSheet(sName))) {
+          if (!storeGroup.has(sName)) storeGroup.set(sName, []);
+          storeGroup.get(sName).push(ds);
+        }
+      });
+
+      let profilesUpdated = false;
+      for (const [targetStore, storeFiles] of storeGroup.entries()) {
+        if (!state.profiles.includes(targetStore)) {
+          state.profiles.push(targetStore);
+          profilesUpdated = true;
+        }
+        if (HourlyStorage) {
+          const prevSaved = await HourlyStorage.loadState(targetStore) || {};
+          const prevFiles = (slot === 'main') ? (prevSaved.rawMainFiles || []) : (prevSaved.rawCompareFiles || []);
+          const merged = [...prevFiles];
+          storeFiles.forEach((newF) => {
+            const idx = merged.findIndex((m) => m.meta && m.meta.fileName === newF.meta.fileName);
+            if (idx >= 0) merged[idx] = newF;
+            else merged.push(newF);
+          });
+          const toSave = {
+            rawMainFiles: (slot === 'main') ? merged : (prevSaved.rawMainFiles || []),
+            rawCompareFiles: (slot === 'compare') ? merged : (prevSaved.rawCompareFiles || []),
+            aggMode: prevSaved.aggMode || state.aggMode,
+            activeBands: prevSaved.activeBands || state.activeBands
+          };
+          await HourlyStorage.saveState(toSave, targetStore);
+        }
+      }
+      if (profilesUpdated) {
+        if (HourlyStorage) await HourlyStorage.saveProfiles(state.profiles);
+        renderProfileSelect();
+      }
+    } catch (dispatchErr) {
+      console.warn('[handleFiles] auto dispatch to profiles failed:', dispatchErr);
+    }
+
     recomputeAggregates();
     updateDashboard();
     await persistCurrentState();
+
+    if (state.currentViewMode === 'kanban') {
+      await renderKanbanView();
+    }
 
     // ファイル管理モーダルが開いていればリストも自動更新
     if (dom['file-manager-dialog'] && dom['file-manager-dialog'].open && activeFileManagerSlot === slot) {
@@ -1119,6 +1174,9 @@
         setHashProfile(state.currentProfile);
         await restorePersistedState();
         renderBandSettingsList();
+        if (state.currentViewMode === 'kanban') {
+          await renderKanbanView();
+        }
         showStatus('店舗プロファイルを「' + state.currentProfile + '」に切り替えました。', 'info');
       });
     }
@@ -1655,15 +1713,35 @@
       let primaryData = null;
       let compareData = null;
 
-      // 1. 各ファイルプールからこの storeName に合致するファイルを厳密抽出
+      // 1. 店舗固有プロファイルに保存されたデータ（persistedMap[storeName]）を最優先で照合
+      let saved = persistedMap[storeName];
+      if (!saved && Parser && typeof Parser.matchStoreName === 'function' && storeName !== '全店') {
+        for (const k in persistedMap) {
+          if (k !== '全店' && Parser.matchStoreName(k, storeName)) {
+            saved = persistedMap[k];
+            break;
+          }
+        }
+      }
+
+      if (saved) {
+        if (saved.primary && Array.isArray(saved.primary.slots)) {
+          primaryData = saved.primary;
+        }
+        if (saved.compare && Array.isArray(saved.compare.slots)) {
+          compareData = saved.compare;
+        }
+      }
+
+      // 2. 各ファイルプールからこの storeName に合致するファイルを厳密抽出
       const filterForStore = (files) => {
         if (!Array.isArray(files) || files.length === 0) return [];
         return files.filter((f) => {
           if (!f || !f.meta) return false;
           const sName = f.meta.storeName || '';
           const fName = f.meta.fileName || '';
-          if (storeName === '全店' || storeName === (HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト')) {
-            return true;
+          if (storeName === '全店') {
+            return sName === '全店' || sName.includes('全社') || fName.includes('全店') || fName.includes('全社');
           }
           if (Parser && typeof Parser.matchStoreName === 'function') {
             return Parser.matchStoreName(sName, storeName) || Parser.matchStoreName(fName, storeName);
@@ -1675,68 +1753,69 @@
       const dedupe = (files) => {
         const seen = new Set();
         return files.filter((f) => {
-          const k = (f.meta && f.meta.fileName) ? f.meta.fileName : JSON.stringify(f.meta || f.slots);
+          const k = (f.meta && f.meta.fileName) ? (f.meta.fileName + (f.meta.storeName || '')) : JSON.stringify(f.meta || f.slots);
           if (seen.has(k)) return false;
           seen.add(k);
           return true;
         });
       };
 
-      const storeMainFiles = dedupe(filterForStore(allMainFilesPool));
-      const storeCompareFiles = dedupe(filterForStore(allCompareFilesPool));
-
-      if (storeMainFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
-        try {
-          primaryData = Parser.aggregate(storeMainFiles, state.aggMode || 'sum');
-        } catch (e) {
-          primaryData = null;
-        }
-      }
-
-      if (storeCompareFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
-        try {
-          compareData = Parser.aggregate(storeCompareFiles, state.aggMode || 'sum');
-        } catch (e) {
-          compareData = null;
-        }
-      }
-
-      // 2. ファイルプールから生成できなかった場合のみ、persistedMap の個別プロファイルを確認
-      if (!primaryData || !compareData) {
-        let saved = persistedMap[storeName];
-        if (!saved && Parser && typeof Parser.matchStoreName === 'function') {
-          for (const k in persistedMap) {
-            if (Parser.matchStoreName(k, storeName)) {
-              saved = persistedMap[k];
-              break;
-            }
-          }
-        }
-        if (saved) {
-          if (!primaryData && saved.primary && Array.isArray(saved.primary.slots)) {
-            // 他店舗合算データが紛れ込んでいないか検証
-            const isMulti = saved.primary.meta && Array.isArray(saved.primary.meta.stores) && saved.primary.meta.stores.length > 1;
-            if (!isMulti || storeName === '全店') {
-              primaryData = saved.primary;
-            }
-          }
-          if (!compareData && saved.compare && Array.isArray(saved.compare.slots)) {
-            const isMulti = saved.compare.meta && Array.isArray(saved.compare.meta.stores) && saved.compare.meta.stores.length > 1;
-            if (!isMulti || storeName === '全店') {
-              compareData = saved.compare;
-            }
+      if (!primaryData) {
+        const storeMainFiles = dedupe(filterForStore(allMainFilesPool));
+        if (storeMainFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+          try {
+            primaryData = Parser.aggregate(storeMainFiles, state.aggMode || 'sum');
+          } catch (e) {
+            primaryData = null;
           }
         }
       }
 
-      // 3. 現在メモリ上の選択中プロファイルの利用は、storeName が真に現在プロファイルと一致する場合に限定
-      // （※ 他の無関係な店舗カードにヘッダー選択中店舗のデータを代入することは厳格に禁止）
+      if (!compareData) {
+        const storeCompareFiles = dedupe(filterForStore(allCompareFilesPool));
+        if (storeCompareFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+          try {
+            compareData = Parser.aggregate(storeCompareFiles, state.aggMode || 'sum');
+          } catch (e) {
+            compareData = null;
+          }
+        }
+      }
+
+      // 3. 全店カードへの合算補完（複数店舗データが存在する場合のみ集約描画）
+      if (storeName === '全店') {
+        const distinctStores = new Set(allMainFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店'));
+        if (!primaryData && distinctStores.size > 1 && Parser && typeof Parser.aggregate === 'function') {
+          try {
+            primaryData = Parser.aggregate(dedupe(allMainFilesPool), state.aggMode || 'sum');
+          } catch (e) {}
+        }
+        const distinctCompareStores = new Set(allCompareFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店'));
+        if (!compareData && distinctCompareStores.size > 1 && Parser && typeof Parser.aggregate === 'function') {
+          try {
+            compareData = Parser.aggregate(dedupe(allCompareFilesPool), state.aggMode || 'sum');
+          } catch (e) {}
+        }
+      }
+
+      // 4. 現在メモリ上の選択中プロファイル（state.primary）の適用
+      // ※ storeName が現在プロファイルと真に一致する場合のみ限定採用（他店舗カードへの漏洩は完全禁止）
       const isCurrentStore = (storeName === state.currentProfile) ||
-        (Parser && typeof Parser.matchStoreName === 'function' && Parser.matchStoreName(storeName, state.currentProfile));
+        (storeName !== '全店' && state.currentProfile !== '全店' && Parser && typeof Parser.matchStoreName === 'function' && Parser.matchStoreName(storeName, state.currentProfile));
 
       if (isCurrentStore) {
-        if (!primaryData && state.primary) primaryData = state.primary;
-        if (!compareData && state.compare) compareData = state.compare;
+        if (!primaryData && state.primary) {
+          const pStore = state.primary.meta ? state.primary.meta.storeName : '';
+          if (!pStore || pStore === '店舗名不明' || Parser.matchStoreName(pStore, storeName)) {
+            primaryData = state.primary;
+          }
+        }
+        if (!compareData && state.compare) {
+          const cStart = state.compare.meta ? state.compare.meta.storeName : '';
+          if (!cStart || cStart === '店舗名不明' || Parser.matchStoreName(cStart, storeName)) {
+            compareData = state.compare;
+          }
+        }
       }
 
       const hasStoreData = Boolean(
