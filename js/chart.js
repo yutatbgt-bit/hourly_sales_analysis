@@ -1010,7 +1010,7 @@
    * @param {object|null} primaryData
    * @param {object|null} compareData
    */
-  function renderKanbanChart(canvas, primaryData, compareData) {
+  function renderKanbanChart(canvas, primaryData, compareData, onClickCallback) {
     if (!canvas || !(canvas instanceof HTMLCanvasElement)) return null;
 
     if (kanbanCharts.has(canvas)) {
@@ -1090,6 +1090,11 @@
         maintainAspectRatio: false,
         animation: { duration: 300 },
         interaction: { mode: 'index', intersect: false },
+        onClick: (event, elements, chart) => {
+          if (typeof onClickCallback === 'function') {
+            onClickCallback();
+          }
+        },
         plugins: {
           legend: {
             display: true,

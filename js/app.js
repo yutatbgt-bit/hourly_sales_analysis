@@ -1446,7 +1446,7 @@
     // 対象店舗へプロファイル切り替え
     state.currentProfile = cleanName;
     setHashProfile(state.currentProfile);
-    renderStoreProfileSelect();
+    renderProfileSelect();
 
     // 対象店舗の保存データを復元
     await restorePersistedState();
@@ -1764,8 +1764,18 @@
       card.appendChild(chartWrapper);
       kanbanGrid.appendChild(card);
 
+      // グラフラッパーおよびキャンバスへの明示的クリック連携
+      const handleStoreSelect = (e) => {
+        if (e) e.stopPropagation();
+        selectStoreAndSwitchToSingleView(storeName);
+      };
+      chartWrapper.addEventListener('click', handleStoreSelect);
+      canvas.addEventListener('click', handleStoreSelect);
+
       if (global.HourlyChart && typeof global.HourlyChart.renderKanbanChart === 'function') {
-        global.HourlyChart.renderKanbanChart(canvas, primaryData, compareData);
+        global.HourlyChart.renderKanbanChart(canvas, primaryData, compareData, () => {
+          selectStoreAndSwitchToSingleView(storeName);
+        });
       }
     });
 
