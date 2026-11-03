@@ -106,6 +106,31 @@
             return;
           }
 
+          // 重複プロファイル（例: 012-夙川店 が存在するのに 夙川店 が勝手に追加されたケース）の自動クリーンアップ
+          const withCode = loaded.filter((p) => /^\d{2,4}-/.test(p));
+          if (withCode.length > 0) {
+            const Parser = global.HourlyParser;
+            const cleanedList = [];
+            const seen = new Set();
+            loaded.forEach((p) => {
+              const trimmed = p.trim();
+              if (!trimmed) return;
+              if (trimmed !== '全店' && !/^\d{2,4}-/.test(trimmed)) {
+                // 店番付きプロファイルの中に合致するものがあれば重複とみなして除去
+                const dup = withCode.some((c) => Parser && typeof Parser.matchStoreName === 'function' ? Parser.matchStoreName(trimmed, c) : c.includes(trimmed));
+                if (dup) return;
+              }
+              if (!seen.has(trimmed)) {
+                seen.add(trimmed);
+                cleanedList.push(trimmed);
+              }
+            });
+            if (cleanedList.length !== loaded.length) {
+              loaded = cleanedList;
+              saveProfiles(loaded).catch(() => {});
+            }
+          }
+
           resolve(loaded);
         };
         req.onerror = () => {

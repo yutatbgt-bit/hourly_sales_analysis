@@ -720,14 +720,14 @@
         }
       });
 
-      let profilesUpdated = false;
+      // ユーザーの店舗選択・プロファイルリストを勝手に増殖させず、既存プロファイルに名寄せして保存
       for (const [targetStore, storeFiles] of storeGroup.entries()) {
-        if (!state.profiles.includes(targetStore)) {
-          state.profiles.push(targetStore);
-          profilesUpdated = true;
-        }
-        if (HourlyStorage) {
-          const prevSaved = await HourlyStorage.loadState(targetStore) || {};
+        const resolvedStore = Parser && typeof Parser.resolveStoreName === 'function'
+          ? Parser.resolveStoreName(targetStore, state.profiles)
+          : null;
+
+        if (resolvedStore && HourlyStorage) {
+          const prevSaved = await HourlyStorage.loadState(resolvedStore) || {};
           const prevFiles = (slot === 'main') ? (prevSaved.rawMainFiles || []) : (prevSaved.rawCompareFiles || []);
           const merged = [...prevFiles];
           storeFiles.forEach((newF) => {
@@ -741,12 +741,8 @@
             aggMode: prevSaved.aggMode || state.aggMode,
             activeBands: prevSaved.activeBands || state.activeBands
           };
-          await HourlyStorage.saveState(toSave, targetStore);
+          await HourlyStorage.saveState(toSave, resolvedStore);
         }
-      }
-      if (profilesUpdated) {
-        if (HourlyStorage) await HourlyStorage.saveProfiles(state.profiles);
-        renderProfileSelect();
       }
     } catch (dispatchErr) {
       console.warn('[handleFiles] auto dispatch to profiles failed:', dispatchErr);
@@ -1147,9 +1143,38 @@
     }
   }
 
+  function cleanDuplicateProfiles(list) {
+    if (!Array.isArray(list)) return [];
+    const withCode = list.filter((p) => /^\d{2,4}-/.test(p));
+    if (withCode.length === 0) return list;
+    const cleaned = [];
+    const seen = new Set();
+    list.forEach((p) => {
+      const trimmed = (p || '').trim();
+      if (!trimmed) return;
+      if (trimmed !== '全店' && !/^\d{2,4}-/.test(trimmed)) {
+        const isDup = withCode.some((c) => Parser && typeof Parser.matchStoreName === 'function' ? Parser.matchStoreName(trimmed, c) : c.includes(trimmed));
+        if (isDup) return;
+      }
+      if (!seen.has(trimmed)) {
+        seen.add(trimmed);
+        cleaned.push(trimmed);
+      }
+    });
+    return cleaned;
+  }
+
   function renderProfileSelect() {
     const select = dom['select-store-profile'];
     if (!select) return;
+
+    // 重複店舗（例: 012-夙川店 が存在するのに勝手に追加された 夙川店）を自動整理
+    const cleaned = cleanDuplicateProfiles(state.profiles);
+    if (cleaned.length !== state.profiles.length) {
+      state.profiles = cleaned;
+      if (HourlyStorage) HourlyStorage.saveProfiles(state.profiles).catch(() => {});
+    }
+
     select.replaceChildren();
 
     state.profiles.forEach((p) => {
@@ -1537,9 +1562,13 @@
     const cleanName = targetStoreName.trim();
     if (!cleanName) return;
 
-    // 店舗プロファイル一覧（state.profiles）に存在しなければ動的に追加
-    if (!state.profiles.includes(cleanName)) {
-      state.profiles.push(cleanName);
+    // 既存店舗プロファイルへの名寄せを優先
+    const resolvedName = (Parser && typeof Parser.resolveStoreName === 'function')
+      ? (Parser.resolveStoreName(cleanName, state.profiles) || cleanName)
+      : cleanName;
+
+    if (!state.profiles.includes(resolvedName)) {
+      state.profiles.push(resolvedName);
       if (HourlyStorage) {
         await HourlyStorage.saveProfiles(state.profiles);
       }
@@ -1549,7 +1578,7 @@
     await persistCurrentState();
 
     // 対象店舗へプロファイル切り替え
-    state.currentProfile = cleanName;
+    state.currentProfile = resolvedName;
     setHashProfile(state.currentProfile);
     renderProfileSelect();
 

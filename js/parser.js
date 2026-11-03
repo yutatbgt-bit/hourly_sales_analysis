@@ -978,6 +978,36 @@
     return results.length > 0 ? results : [parseHourlySalesCsv(buffer, fileName)];
   }
 
+  /**
+   * 表記ゆれ店舗名から既存の登録店舗プロファイル名を動的に解決
+   * @param {string} rawName - シート名、ファイル名等の店舗名
+   * @param {Array<string>} candidates - 既存登録プロファイル一覧
+   * @returns {string|null} 一致した既存プロファイル名、またはnull
+   */
+  function resolveStoreName(rawName, candidates) {
+    if (!rawName || typeof rawName !== 'string') return null;
+    const clean = rawName.trim();
+    if (!clean) return null;
+
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return clean;
+    }
+
+    // 1. 完全一致 (大文字小文字無視)
+    const exact = candidates.find((c) => c && c.toLowerCase() === clean.toLowerCase());
+    if (exact) return exact;
+
+    // 2. matchStoreName による動的表記ゆれ一致
+    for (const cand of candidates) {
+      if (!cand) continue;
+      if (matchStoreName(clean, cand) || matchStoreName(cand, clean)) {
+        return cand;
+      }
+    }
+
+    return null;
+  }
+
   global.HourlyParser = Object.freeze({
     parse: parseHourlySalesCsv,
     parseAllStoreSheets,
@@ -986,6 +1016,7 @@
     sanitizeDisplayText,
     isGenericOrSystemSheet,
     matchStoreName,
+    resolveStoreName,
     CsvFormatError,
     HOUR_START,
     HOUR_END,
