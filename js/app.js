@@ -1831,18 +1831,42 @@
         const r = Fmt.ratio(cur, base);
         renderBadge(id, Fmt.isNum(r) ? r - 100 : null, '比較比 ' + Fmt.ratioText(r), 'up');
       };
-      ratioBadge('kpi-sales-badge', t.sales, c.sales);
-      ratioBadge('kpi-customers-badge', t.customers, c.customers);
-      ratioBadge('kpi-items-badge', t.items, c.items);
+
+      // 分析データの現時間帯（最新実績スロット）を特定（棒グラフホバーの累計表示と同様）
+      let cutoffIdx = -1;
+      for (let i = primary.slots.length - 1; i >= 0; i--) {
+        if (primary.slots[i].hasData) {
+          cutoffIdx = i;
+          break;
+        }
+      }
+
+      const curSlot = cutoffIdx !== -1 ? primary.slots[cutoffIdx] : null;
+      const cmpSlot = (cutoffIdx !== -1 && compare.slots) ? compare.slots[cutoffIdx] : null;
+
+      // 分析データの現時間帯累計値
+      const curCumSales = curSlot && Fmt.isNum(curSlot.cumSales) ? curSlot.cumSales : t.sales;
+      const curCumCustomers = curSlot && Fmt.isNum(curSlot.cumCustomers) ? curSlot.cumCustomers : t.customers;
+      const curCumItems = curSlot && Fmt.isNum(curSlot.cumItems) ? curSlot.cumItems : t.items;
+
+      // 比較データの現時間帯累計値（ホバー累計表示対象と完全一致）
+      const cmpCumSales = cmpSlot && Fmt.isNum(cmpSlot.cumSales) ? cmpSlot.cumSales : c.sales;
+      const cmpCumCustomers = cmpSlot && Fmt.isNum(cmpSlot.cumCustomers) ? cmpSlot.cumCustomers : c.customers;
+      const cmpCumItems = cmpSlot && Fmt.isNum(cmpSlot.cumItems) ? cmpSlot.cumItems : c.items;
+
+      // 売上合計実績・客数合計実績・買上打数合計の3つを現時間帯累計対比で算出
+      ratioBadge('kpi-sales-badge', curCumSales, cmpCumSales);
+      ratioBadge('kpi-customers-badge', curCumCustomers, cmpCumCustomers);
+      ratioBadge('kpi-items-badge', curCumItems, cmpCumItems);
       ratioBadge('kpi-price-badge', t.avgSpend, c.avgSpend);
 
       const d = Fmt.pointDiff(t.discountRate, c.discountRate);
       renderBadge('kpi-discount-rate-badge', d, '比較差 ' + Fmt.pointText(d), 'down');
 
-      // 比較データの実績数値を表示
-      setCompareText('kpi-sales-compare', Fmt.yen(c.sales));
-      setCompareText('kpi-customers-compare', Fmt.integer(c.customers, ' 人'));
-      setCompareText('kpi-items-compare', Fmt.integer(c.items, ' 打数'));
+      // 比較データの実績数値を表示 (現時間帯までの累計値を表示)
+      setCompareText('kpi-sales-compare', Fmt.yen(cmpCumSales));
+      setCompareText('kpi-customers-compare', Fmt.integer(cmpCumCustomers, ' 人'));
+      setCompareText('kpi-items-compare', Fmt.integer(cmpCumItems, ' 打数'));
       setCompareText('kpi-avg-spend-compare', '客単価: ' + Fmt.yen(c.avgSpend) + ' ／ 一品: ' + Fmt.yen(c.avgItemPrice));
       setCompareText('kpi-discount-rate-compare', '値引率: ' + Fmt.percent(c.discountRate) + '（' + Fmt.yen(c.discount) + '）');
     } else {
@@ -2328,8 +2352,39 @@
     });
     if (otherDS && cmpCols) {
       const c = otherDS.totals;
+
+      // 現時間帯（currentDSの最新実績スロット）の特定
+      let cutoffIdx = -1;
+      for (let idx = currentDS.slots.length - 1; idx >= 0; idx--) {
+        if (currentDS.slots[idx].hasData) {
+          cutoffIdx = idx;
+          break;
+        }
+      }
+      const curSlot = cutoffIdx !== -1 ? currentDS.slots[cutoffIdx] : null;
+      const othSlot = (cutoffIdx !== -1 && otherDS.slots) ? otherDS.slots[cutoffIdx] : null;
+
+      const cumKeyMap = {
+        sales: 'cumSales',
+        customers: 'cumCustomers',
+        items: 'cumItems',
+        discountRate: 'cumDiscountRate'
+      };
+
       cmpCols.forEach((col, i) => {
-        const value = col.mode === 'ratio' ? Fmt.ratio(t[col.source], c[col.source]) : Fmt.pointDiff(t[col.source], c[col.source]);
+        let value = null;
+        const cumKey = cumKeyMap[col.source];
+
+        // 右側3列（売上、客数、打数）の合計値は、全体比ではなく現時点の時間帯累計比（ホバー累計値と同一）を算出
+        if (col.mode === 'ratio' && cumKey && curSlot && othSlot && Fmt.isNum(curSlot[cumKey]) && Fmt.isNum(othSlot[cumKey])) {
+          value = Fmt.ratio(curSlot[cumKey], othSlot[cumKey]);
+        } else if (col.mode === 'point' && cumKey && curSlot && othSlot && Fmt.isNum(curSlot[cumKey]) && Fmt.isNum(othSlot[cumKey])) {
+          value = Fmt.pointDiff(curSlot[cumKey], othSlot[cumKey]);
+        } else {
+          // フォールバック: 全体合計の対比
+          value = col.mode === 'ratio' ? Fmt.ratio(t[col.source], c[col.source]) : Fmt.pointDiff(t[col.source], c[col.source]);
+        }
+
         const td = cmpCell(value, col);
         if (i === 0) td.classList.add('td-cum-first');
         tr.appendChild(td);
