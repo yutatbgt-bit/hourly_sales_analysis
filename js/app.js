@@ -1770,7 +1770,7 @@
           const sName = f.meta.storeName || '';
           const fName = f.meta.fileName || '';
           if (storeName === '全店') {
-            return sName === '全店' || sName.includes('全社') || fName.includes('全店') || fName.includes('全社');
+            return sName === '全店' || sName === '全店舗' || sName.includes('全社') || fName.includes('全店') || fName.includes('全店舗') || fName.includes('全社');
           }
           if (Parser && typeof Parser.matchStoreName === 'function') {
             return Parser.matchStoreName(sName, storeName) || Parser.matchStoreName(fName, storeName);
@@ -1813,13 +1813,13 @@
 
       // 3. 全店カードへの合算補完（複数店舗データが存在する場合のみ集約描画）
       if (storeName === '全店') {
-        const distinctStores = new Set(allMainFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店'));
+        const distinctStores = new Set(allMainFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店' && s !== '全店舗'));
         if (!primaryData && distinctStores.size > 1 && Parser && typeof Parser.aggregate === 'function') {
           try {
             primaryData = Parser.aggregate(dedupe(allMainFilesPool), state.aggMode || 'sum');
           } catch (e) {}
         }
-        const distinctCompareStores = new Set(allCompareFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店'));
+        const distinctCompareStores = new Set(allCompareFilesPool.map((f) => f.meta?.storeName).filter((s) => s && s !== '店舗名不明' && s !== '全店' && s !== '全店舗'));
         if (!compareData && distinctCompareStores.size > 1 && Parser && typeof Parser.aggregate === 'function') {
           try {
             compareData = Parser.aggregate(dedupe(allCompareFilesPool), state.aggMode || 'sum');

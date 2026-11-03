@@ -90,7 +90,11 @@
     if (!name || typeof name !== 'string') return true;
     const t = name.trim();
     if (!t) return true;
-    return /^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*|空店舗|全店舗|全店合計)$/i.test(t);
+    // 「全店舗」「全店」「全社」は有効な全社対象店舗名であるため汎用シート扱いしない
+    if (/^(?:全店舗|全店|全社|全店合計)$/i.test(t)) {
+      return false;
+    }
+    return /^(?:sheet\s*\d*|シート\s*\d*|page\s*\d*|table\s*\d*|ワークシート\d*|空店舗)$/i.test(t);
   }
 
   /**
@@ -104,6 +108,11 @@
     const t = String(target).trim().replace(/[\s　]+/g, '').toLowerCase();
     const c = String(candidate).trim().replace(/[\s　]+/g, '').toLowerCase();
     if (t === c) return true;
+
+    // 全店・全店舗・全社の汎用相互照合
+    const isAllT = /^(?:全店|全店舗|全社|全店合計)$/i.test(t);
+    const isAllC = /^(?:全店|全店舗|全社|全店合計)$/i.test(c);
+    if (isAllT && isAllC) return true;
 
     const tNorm = cleanPrefix(t);
     const cNorm = cleanPrefix(c);
@@ -336,6 +345,10 @@
   function parseStoreFromFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return null;
     const clean = fileName.replace(/\.[^.]+$/, ''); // 拡張子除去
+    // パターン0: 全店舗・全社・全店
+    if (/(?:全社|全店舗|全店合計|全店)/.test(clean)) {
+      return '全店舗';
+    }
     // パターン1: 3〜4桁店番 + 店舗名 (例: 002王子店, 002-王子店, 011_塚口, 012夙川)
     const m1 = /(?:^|[^0-9])(\d{2,4})[-_/・:：\s]?([\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]{2,10}(?:店)?)/.exec(clean);
     if (m1) {
@@ -699,14 +712,22 @@
     const safeFileName = sanitizeDisplayText(fileName, 120);
     const dateInfo = parseDateText(findLabeledValue(rows, ['年月日', '日付', '営業日'], header.headerRowIndex))
       || parseDateFromFileName(fileName);
-    let storeName = sanitizeDisplayText(findLabeledValue(rows, ['店名', '店舗名', '店舗'], header.headerRowIndex) || '');
-    if (!storeName || storeName === '店舗名不明' || isGenericOrSystemSheet(storeName)) {
-      if (options && options.sheetName && !isGenericOrSystemSheet(options.sheetName)) {
-        storeName = sanitizeDisplayText(options.sheetName);
+    let rawStore = sanitizeDisplayText(findLabeledValue(rows, ['店名', '店舗名', '店舗'], header.headerRowIndex) || '');
+    const isAllStoreText = (str) => /^(?:全店舗|全店|全社|全店合計)$/i.test(String(str || '').trim().replace(/[\s　_-]/g, ''));
+
+    let storeName = '';
+    if (isAllStoreText(rawStore)) {
+      storeName = '全店舗';
+    } else if (rawStore && rawStore !== '店舗名不明' && !isGenericOrSystemSheet(rawStore)) {
+      storeName = rawStore;
+    } else if (options && options.sheetName && !isGenericOrSystemSheet(options.sheetName)) {
+      storeName = isAllStoreText(options.sheetName) ? '全店舗' : sanitizeDisplayText(options.sheetName);
+    } else {
+      const fromFile = parseStoreFromFileName(fileName);
+      if (fromFile) {
+        storeName = isAllStoreText(fromFile) ? '全店舗' : fromFile;
       } else {
-        const fromFile = parseStoreFromFileName(fileName);
-        if (fromFile) storeName = fromFile;
-        else storeName = '店舗名不明';
+        storeName = '店舗名不明';
       }
     }
 
@@ -991,6 +1012,12 @@
 
     if (!Array.isArray(candidates) || candidates.length === 0) {
       return clean;
+    }
+
+    // 0. 全店舗・全店・全社の相互解決
+    if (/^(?:全店舗|全店|全社|全店合計)$/i.test(clean.replace(/[\s　_-]/g, ''))) {
+      const allCand = candidates.find((c) => /^(?:全店|全店舗|全社)$/i.test((c || '').trim()));
+      if (allCand) return allCand;
     }
 
     // 1. 完全一致 (大文字小文字無視)
