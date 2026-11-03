@@ -426,6 +426,54 @@
       const profileToLoad = targetProfile || state.currentProfile;
       const saved = await HourlyStorage.loadState(profileToLoad);
       if (!saved) {
+        // 他プロファイルまたは既存ファイルプールからこの店舗に合致するファイルを自動検索
+        let matchedMain = [];
+        let matchedCompare = [];
+        try {
+          const allProfiles = await HourlyStorage.loadAllProfilesState();
+          const candidateMain = [];
+          const candidateCompare = [];
+          if (Array.isArray(state.rawMainFiles)) candidateMain.push(...state.rawMainFiles);
+          if (Array.isArray(state.rawCompareFiles)) candidateCompare.push(...state.rawCompareFiles);
+          if (Array.isArray(allProfiles)) {
+            allProfiles.forEach((item) => {
+              if (item && item.state) {
+                if (Array.isArray(item.state.rawMainFiles)) candidateMain.push(...item.state.rawMainFiles);
+                if (Array.isArray(item.state.rawCompareFiles)) candidateCompare.push(...item.state.rawCompareFiles);
+              }
+            });
+          }
+          const isMatch = (f) => {
+            if (!f || !f.meta) return false;
+            const sName = f.meta.storeName || '';
+            const fName = f.meta.fileName || '';
+            return Parser ? (Parser.matchStoreName(sName, profileToLoad) || Parser.matchStoreName(fName, profileToLoad)) : (sName === profileToLoad);
+          };
+          const dedupe = (list) => {
+            const seen = new Set();
+            return list.filter((f) => {
+              const k = f.meta?.fileName || JSON.stringify(f.meta);
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+          };
+          matchedMain = dedupe(candidateMain.filter(isMatch));
+          matchedCompare = dedupe(candidateCompare.filter(isMatch));
+        } catch (scanErr) {
+          console.warn('[restorePersistedState] scan pool error:', scanErr);
+        }
+
+        if (matchedMain.length > 0 || matchedCompare.length > 0) {
+          state.rawMainFiles = matchedMain;
+          state.rawCompareFiles = matchedCompare;
+          state.aggMode = 'sum';
+          recomputeAggregates();
+          updateDashboard();
+          await persistCurrentState();
+          return;
+        }
+
         state.rawMainFiles = [];
         state.rawCompareFiles = [];
         state.primary = null;
@@ -440,7 +488,6 @@
         updateDashboard();
         return;
       }
-
       state.rawMainFiles = (Array.isArray(saved.rawMainFiles) && saved.rawMainFiles.length > 0) ? saved.rawMainFiles : [];
       state.rawCompareFiles = (Array.isArray(saved.rawCompareFiles) && saved.rawCompareFiles.length > 0) ? saved.rawCompareFiles : [];
       state.aggMode = (saved.aggMode === 'sum' || saved.aggMode === 'avg') ? saved.aggMode : 'sum';
@@ -1592,36 +1639,102 @@
       addStore(HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト');
     }
 
+    // 全プロファイルおよびメモリ上に存在する全ファイルプールを統合
+    const allMainFilesPool = [];
+    const allCompareFilesPool = [];
+    if (Array.isArray(state.rawMainFiles)) allMainFilesPool.push(...state.rawMainFiles);
+    if (Array.isArray(state.rawCompareFiles)) allCompareFilesPool.push(...state.rawCompareFiles);
+    Object.values(persistedMap).forEach((p) => {
+      if (Array.isArray(p.rawMainFiles)) allMainFilesPool.push(...p.rawMainFiles);
+      if (Array.isArray(p.rawCompareFiles)) allCompareFilesPool.push(...p.rawCompareFiles);
+    });
+
     let storesWithDataCount = 0;
 
     storeNames.forEach((storeName) => {
       let primaryData = null;
       let compareData = null;
 
-      // 1. 完全一致
-      let saved = persistedMap[storeName];
+      // 1. 各ファイルプールからこの storeName に合致するファイルを厳密抽出
+      const filterForStore = (files) => {
+        if (!Array.isArray(files) || files.length === 0) return [];
+        return files.filter((f) => {
+          if (!f || !f.meta) return false;
+          const sName = f.meta.storeName || '';
+          const fName = f.meta.fileName || '';
+          if (storeName === '全店' || storeName === (HourlyStorage ? HourlyStorage.DEFAULT_PROFILE_NAME : 'デフォルト')) {
+            return true;
+          }
+          if (Parser && typeof Parser.matchStoreName === 'function') {
+            return Parser.matchStoreName(sName, storeName) || Parser.matchStoreName(fName, storeName);
+          }
+          return sName === storeName || fName.includes(storeName);
+        });
+      };
 
-      // 2. 店舗名の動的表記ゆれ・店番プレフィックスの自動吸収（Parser.matchStoreName）
-      if (!saved && Parser && typeof Parser.matchStoreName === 'function') {
-        for (const k in persistedMap) {
-          if (Parser.matchStoreName(k, storeName)) {
-            saved = persistedMap[k];
-            break;
+      const dedupe = (files) => {
+        const seen = new Set();
+        return files.filter((f) => {
+          const k = (f.meta && f.meta.fileName) ? f.meta.fileName : JSON.stringify(f.meta || f.slots);
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      };
+
+      const storeMainFiles = dedupe(filterForStore(allMainFilesPool));
+      const storeCompareFiles = dedupe(filterForStore(allCompareFilesPool));
+
+      if (storeMainFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+        try {
+          primaryData = Parser.aggregate(storeMainFiles, state.aggMode || 'sum');
+        } catch (e) {
+          primaryData = null;
+        }
+      }
+
+      if (storeCompareFiles.length > 0 && Parser && typeof Parser.aggregate === 'function') {
+        try {
+          compareData = Parser.aggregate(storeCompareFiles, state.aggMode || 'sum');
+        } catch (e) {
+          compareData = null;
+        }
+      }
+
+      // 2. ファイルプールから生成できなかった場合のみ、persistedMap の個別プロファイルを確認
+      if (!primaryData || !compareData) {
+        let saved = persistedMap[storeName];
+        if (!saved && Parser && typeof Parser.matchStoreName === 'function') {
+          for (const k in persistedMap) {
+            if (Parser.matchStoreName(k, storeName)) {
+              saved = persistedMap[k];
+              break;
+            }
+          }
+        }
+        if (saved) {
+          if (!primaryData && saved.primary && Array.isArray(saved.primary.slots)) {
+            // 他店舗合算データが紛れ込んでいないか検証
+            const isMulti = saved.primary.meta && Array.isArray(saved.primary.meta.stores) && saved.primary.meta.stores.length > 1;
+            if (!isMulti || storeName === '全店') {
+              primaryData = saved.primary;
+            }
+          }
+          if (!compareData && saved.compare && Array.isArray(saved.compare.slots)) {
+            const isMulti = saved.compare.meta && Array.isArray(saved.compare.meta.stores) && saved.compare.meta.stores.length > 1;
+            if (!isMulti || storeName === '全店') {
+              compareData = saved.compare;
+            }
           }
         }
       }
 
-      if (saved) {
-        if (saved.primary && Array.isArray(saved.primary.slots)) {
-          primaryData = saved.primary;
-        }
-        if (saved.compare && Array.isArray(saved.compare.slots)) {
-          compareData = saved.compare;
-        }
-      }
+      // 3. 現在メモリ上の選択中プロファイルの利用は、storeName が真に現在プロファイルと一致する場合に限定
+      // （※ 他の無関係な店舗カードにヘッダー選択中店舗のデータを代入することは厳格に禁止）
+      const isCurrentStore = (storeName === state.currentProfile) ||
+        (Parser && typeof Parser.matchStoreName === 'function' && Parser.matchStoreName(storeName, state.currentProfile));
 
-      // 現在選択中の店舗メモリ上のデータをフォールバック
-      if (storeName === state.currentProfile || (Parser && typeof Parser.matchStoreName === 'function' && Parser.matchStoreName(storeName, state.currentProfile))) {
+      if (isCurrentStore) {
         if (!primaryData && state.primary) primaryData = state.primary;
         if (!compareData && state.compare) compareData = state.compare;
       }
