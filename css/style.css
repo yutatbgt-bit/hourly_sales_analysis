@@ -2721,6 +2721,56 @@ button.file-pill:hover {
   border-color: rgba(56, 189, 248, 0.35);
 }
 
+.kanban-card.clickable-card {
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+.kanban-card.clickable-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px 0 rgba(0, 0, 0, 0.55);
+  border-color: rgba(56, 189, 248, 0.55);
+}
+
+:root[data-theme="light"] .kanban-card.clickable-card:hover {
+  box-shadow: 0 10px 24px 0 rgba(15, 23, 42, 0.16);
+  border-color: rgba(2, 132, 199, 0.55);
+}
+
+.kanban-card.clickable-card:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.kanban-card.clickable-card:hover .kanban-store-title {
+  color: #38bdf8;
+}
+
+:root[data-theme="light"] .kanban-card.clickable-card:hover .kanban-store-title {
+  color: #0284c7;
+}
+
+.kanban-store-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: opacity 0.2s ease, transform 0.2s ease, stroke 0.2s ease;
+  margin-left: 0.2rem;
+  vertical-align: middle;
+}
+
+.kanban-card.clickable-card:hover .kanban-store-link-icon {
+  opacity: 1;
+  stroke: #38bdf8;
+  transform: translate(1px, -1px);
+}
+
+:root[data-theme="light"] .kanban-card.clickable-card:hover .kanban-store-link-icon {
+  stroke: #0284c7;
+}
+
 :root[data-theme="light"] .kanban-card:hover {
   box-shadow: 0 8px 20px 0 rgba(15, 23, 42, 0.12);
   border-color: rgba(2, 132, 199, 0.4);

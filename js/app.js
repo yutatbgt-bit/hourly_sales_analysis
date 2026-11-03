@@ -1424,6 +1424,41 @@
   }
 
   /**
+   * 指定した店舗プロファイルの個別店舗ビューへ切り替え（動的リンク・ハードコード完全排除）
+   * @param {string} targetStoreName - 移動先店舗名
+   */
+  async function selectStoreAndSwitchToSingleView(targetStoreName) {
+    if (!targetStoreName || typeof targetStoreName !== 'string') return;
+    const cleanName = targetStoreName.trim();
+    if (!cleanName) return;
+
+    // 店舗プロファイル一覧（state.profiles）に存在しなければ動的に追加
+    if (!state.profiles.includes(cleanName)) {
+      state.profiles.push(cleanName);
+      if (HourlyStorage) {
+        await HourlyStorage.saveProfiles(state.profiles);
+      }
+    }
+
+    // 現在の店舗データを確実にIndexedDBに退避
+    await persistCurrentState();
+
+    // 対象店舗へプロファイル切り替え
+    state.currentProfile = cleanName;
+    setHashProfile(state.currentProfile);
+    renderStoreProfileSelect();
+
+    // 対象店舗の保存データを復元
+    await restorePersistedState();
+    renderBandSettingsList();
+
+    // 個別店舗ビューへ切り替え
+    await switchViewMode('single');
+
+    showStatus('店舗「' + cleanName + '」の個別店舗ビューを表示しました。', 'info');
+  }
+
+  /**
    * 登録店舗の2列カンバンビューを描画
    * - データが入っている店舗のみを2列カンバンビューで表示（空カードはスキップ）
    * - 各カードのヘッダーは各店舗名のみ表示（余計なチップや表は不要）
@@ -1601,7 +1636,24 @@
       storesWithDataCount++;
 
       const card = document.createElement('div');
-      card.className = 'kanban-card has-data';
+      card.className = 'kanban-card has-data clickable-card';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', storeName + ' の個別店舗ビューを表示');
+      card.setAttribute('title', 'クリックして「' + storeName + '」の個別店舗ビューを表示');
+
+      // クリックイベントで個別店舗ビューへ動的リンク遷移（ハードコード完全排除）
+      card.addEventListener('click', (e) => {
+        selectStoreAndSwitchToSingleView(storeName);
+      });
+
+      // キーボード操作対応 (Enter / Space)
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          selectStoreAndSwitchToSingleView(storeName);
+        }
+      });
 
       const header = document.createElement('div');
       header.className = 'kanban-card-header';
@@ -1613,6 +1665,33 @@
       const title = document.createElement('h4');
       title.className = 'kanban-store-title';
       title.textContent = storeName;
+
+      // リンク移動アイコン（SVG）の安全な生成
+      const linkIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      linkIcon.setAttribute('class', 'kanban-store-link-icon');
+      linkIcon.setAttribute('width', '13');
+      linkIcon.setAttribute('height', '13');
+      linkIcon.setAttribute('viewBox', '0 0 24 24');
+      linkIcon.setAttribute('fill', 'none');
+      linkIcon.setAttribute('stroke', 'currentColor');
+      linkIcon.setAttribute('stroke-width', '2');
+      linkIcon.setAttribute('stroke-linecap', 'round');
+      linkIcon.setAttribute('stroke-linejoin', 'round');
+      linkIcon.setAttribute('aria-hidden', 'true');
+      const p1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p1.setAttribute('d', 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6');
+      const p2 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      p2.setAttribute('points', '15 3 21 3 21 9');
+      const p3 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      p3.setAttribute('x1', '10');
+      p3.setAttribute('y1', '14');
+      p3.setAttribute('x2', '21');
+      p3.setAttribute('y2', '3');
+      linkIcon.appendChild(p1);
+      linkIcon.appendChild(p2);
+      linkIcon.appendChild(p3);
+      title.appendChild(linkIcon);
+
       titleWrap.appendChild(title);
 
       // 時間累計の売上対比と客数対比を算出（現時間帯までの累計）
